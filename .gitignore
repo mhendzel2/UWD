@@ -8,3 +8,8 @@ dist/
 frontend/node_modules/
 frontend/dist/
 *.sqlite
+sample_data/bot-eod-report-2025-12-24.csv
+sample_data/chain-oi-changes-2025-12-24.csv
+sample_data/dp-eod-report-2025-12-24.csv
+sample_data/hot-chains-2025-12-24.csv
+sample_data/stock-screener-2025-12-24.csv
