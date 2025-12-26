@@ -15,8 +15,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    JSON,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -96,7 +97,7 @@ class Session(Base):
     date = Column(Date, nullable=False)
     strategy_mode = Column(PgEnum(StrategyMode, name="strategy_mode"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    data_window = Column(JSONB, nullable=True)
+    data_window = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
 
     raw_files = relationship("RawFile", back_populates="session", cascade="all, delete-orphan")
@@ -120,7 +121,7 @@ class RawFile(Base):
     imported_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     parse_status = Column(PgEnum(ParseStatus, name="parse_status"), nullable=False, default=ParseStatus.OK)
     error_message = Column(Text, nullable=True)
-    extras = Column(JSONB, nullable=True)
+    extras = Column(JSON, nullable=True)
 
     session = relationship("Session", back_populates="raw_files")
 
@@ -159,7 +160,7 @@ class FeaturesUnderlyingDay(Base):
     dp_distribution_bias = Column(Boolean, default=False)
 
     # Numeric support payload
-    numeric_context = Column(JSONB, nullable=True)
+    numeric_context = Column(JSON, nullable=True)
     oi_persistence_3d = Column(Numeric(10, 4), nullable=True)
     hot_chain_persistence_3d = Column(Numeric(10, 4), nullable=True)
     intent_persistence_3d = Column(Numeric(10, 4), nullable=True)
@@ -185,12 +186,12 @@ class RegimeDecision(Base):
     asof_date = Column(Date, nullable=False)
     regime_label = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=False)
     confidence_tier = Column(PgEnum(ConfidenceTier, name="confidence_tier"), nullable=False)
-    reasons = Column(JSONB, nullable=False)
-    conflicts = Column(JSONB, nullable=True)
+    reasons = Column(JSON, nullable=False)
+    conflicts = Column(JSON, nullable=True)
     decision_version = Column(String(16), nullable=False, default="v0")
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     dominant_horizon_hint = Column(PgEnum(DominantHorizonHint, name="dominant_horizon_hint"), nullable=True)
-    ecology_state = Column(JSONB, nullable=True)
+    ecology_state = Column(JSON, nullable=True)
     ecology_version = Column(String(16), nullable=False, default="v0")
 
     feature_id = Column(UUID(as_uuid=True), ForeignKey("features_underlying_day.feature_id", ondelete="CASCADE"), nullable=True)
@@ -211,9 +212,9 @@ class Plan(Base):
     underlying = Column(String(32), nullable=False)
     trade_date = Column(Date, nullable=False)
     plan_type = Column(PgEnum(PlanType, name="plan_type"), nullable=False)
-    staged_contracts = Column(JSONB, nullable=True)
-    entry_conditions = Column(JSONB, nullable=True)
-    risk_limits = Column(JSONB, nullable=True)
+    staged_contracts = Column(JSON, nullable=True)
+    entry_conditions = Column(JSON, nullable=True)
+    risk_limits = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     regime_id = Column(UUID(as_uuid=True), ForeignKey("regime_decisions.decision_id", ondelete="SET NULL"), nullable=True)
@@ -232,7 +233,7 @@ class OutcomeDay(Base):
     realized_label_manual = Column(PgEnum(OutcomeLabel, name="outcome_label"), nullable=True)
     range_pct = Column(Numeric(6, 4), nullable=True)
     close_vs_open_pct = Column(Numeric(6, 4), nullable=True)
-    breach_events = Column(JSONB, nullable=True)
+    breach_events = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -245,7 +246,7 @@ class LogMessage(Base):
     ts = Column(DateTime, default=datetime.utcnow, nullable=False)
     level = Column(PgEnum(LogLevel, name="log_level"), nullable=False, default=LogLevel.INFO)
     message = Column(Text, nullable=False)
-    context = Column(JSONB, nullable=True)
+    context = Column(JSON, nullable=True)
 
     session = relationship("Session", back_populates="logs")
 
@@ -258,7 +259,7 @@ class DailyBrief(Base):
     date = Column(Date, nullable=False)
     brief_type = Column(PgEnum(BriefType, name="brief_type"), nullable=False)
     underlying_universe = Column(PgEnum(UnderlyingUniverse, name="underlying_universe"), nullable=True)
-    entries = Column(JSONB, nullable=False)
+    entries = Column(JSON, nullable=False)
     generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     brief_version = Column(Text, nullable=False, default="v1")
 
@@ -277,9 +278,9 @@ class EnsembleDecision(Base):
     asof_date = Column(Date, nullable=False)
     ensemble_label = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=False)
     ensemble_confidence = Column(Numeric(10, 4), nullable=True)
-    horizon_weights = Column(JSONB, nullable=True)
-    component_votes = Column(JSONB, nullable=True)
-    stability_metrics = Column(JSONB, nullable=True)
+    horizon_weights = Column(JSON, nullable=True)
+    component_votes = Column(JSON, nullable=True)
+    stability_metrics = Column(JSON, nullable=True)
     ensemble_version = Column(String(16), nullable=False, default="v1")
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -292,7 +293,7 @@ class ModelWeights(Base):
 
     weights_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     asof_date = Column(Date, nullable=False)
-    weights = Column(JSONB, nullable=False)
+    weights = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     version = Column(String(16), nullable=False, default="v1")
 
@@ -326,10 +327,10 @@ class BacktestRun(Base):
     initial_capital = Column(Numeric(14, 2), nullable=False, default=100000.0)
     
     # Configuration snapshot
-    parameters = Column(JSONB, nullable=False, default=dict)
+    parameters = Column(JSON, nullable=False, default=dict)
     
     # Performance summary (populated after run completes)
-    performance_summary = Column(JSONB, nullable=True)
+    performance_summary = Column(JSON, nullable=True)
     
     # Status tracking
     status = Column(String(32), nullable=False, default="RUNNING")
@@ -388,10 +389,10 @@ class SimulatedTrade(Base):
     max_adverse_excursion = Column(Numeric(10, 6), nullable=True)
     
     # Signal context snapshot (for post-analysis)
-    signal_snapshot = Column(JSONB, nullable=True)
+    signal_snapshot = Column(JSON, nullable=True)
     
     # Greeks at entry (for options)
-    greeks_at_entry = Column(JSONB, nullable=True)
+    greeks_at_entry = Column(JSON, nullable=True)
     
     # Holding period
     holding_minutes = Column(Integer, nullable=True)

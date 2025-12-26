@@ -64,8 +64,8 @@ class BacktestConfig:
     
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if self.start_date >= self.end_date:
-            raise ValueError("start_date must be before end_date")
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must be before or equal to end_date")
         
         if self.initial_capital <= 0:
             raise ValueError("initial_capital must be positive")

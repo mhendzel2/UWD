@@ -7,9 +7,10 @@ Implementations can fetch from databases, CSV files, or external APIs.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+import decimal
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -533,6 +534,231 @@ class CsvDataProvider(DataProvider):
         """Get price history from CSV data."""
         self._load_data()
         
+        if symbol not in self._underlying_data:
+            return []
+            
+        bars = []
+        for trade_date, quote in sorted(self._underlying_data[symbol].items()):
+            if start_date <= trade_date <= end_date:
+                bars.append(PriceBar(
+                    timestamp=quote.timestamp,
+                    open=quote.open,
+                    high=quote.high,
+                    low=quote.low,
+                    close=quote.close,
+                    volume=quote.volume
+                ))
+                
+        return bars
+
+
+class UwdCsvDataProvider(DataProvider):
+    """
+    Data provider that reads from UWD format CSV files.
+    
+    Handles:
+    - stock-screener-YYYY-MM-DD.csv (Underlying data)
+    - hot-chains-YYYY-MM-DD.csv (Option data)
+    """
+    
+    def __init__(self, data_dir: str):
+        self.data_dir = data_dir
+        self._underlying_data: Dict[str, Dict[date, UnderlyingQuote]] = {}
+        self._option_data: Dict[str, Dict[date, List[OptionQuote]]] = {}
+        self._loaded_dates: set[date] = set()
+        
+    def _parse_option_symbol(self, symbol: str) -> Tuple[str, date, str, Decimal]:
+        """
+        Parse OCC option symbol.
+        Format: SPY251224C00689000
+        """
+        # Find where the date starts (first digit)
+        import re
+        match = re.search(r'(\d{6})([CP])(\d{8})', symbol)
+        if not match:
+            raise ValueError(f"Invalid option symbol: {symbol}")
+            
+        date_str = match.group(1)
+        type_char = match.group(2)
+        strike_str = match.group(3)
+        
+        # Extract underlying (everything before the date)
+        underlying = symbol[:match.start()]
+        
+        # Parse date (YYMMDD)
+        year = int("20" + date_str[:2])
+        month = int(date_str[2:4])
+        day = int(date_str[4:6])
+        expiration = date(year, month, day)
+        
+        # Parse strike (divide by 1000)
+        strike = Decimal(strike_str) / 1000
+        
+        option_type = "CALL" if type_char == 'C' else "PUT"
+        
+        return underlying, expiration, option_type, strike
+
+    def _load_date(self, target_date: date):
+        """Load data for a specific date if not already loaded."""
+        if target_date in self._loaded_dates:
+            return
+            
+        import os
+        import csv
+        from pathlib import Path
+        
+        data_path = Path(self.data_dir)
+        date_str = target_date.strftime("%Y-%m-%d")
+        
+        # 1. Load Underlying Data (stock-screener)
+        screener_file = data_path / f"stock-screener-{date_str}.csv"
+        if screener_file.exists():
+            with open(screener_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        symbol = row['ticker']
+                        
+                        # Handle missing open price by using prev_close or close
+                        if not row['close']:
+                            continue
+                            
+                        close = Decimal(row['close'])
+                        high = Decimal(row['high']) if row['high'] else close
+                        low = Decimal(row['low']) if row['low'] else close
+                        prev_close = Decimal(row['prev_close']) if row.get('prev_close') else close
+                        
+                        # Use prev_close as proxy for open if not available
+                        open_price = prev_close
+                        
+                        if symbol not in self._underlying_data:
+                            self._underlying_data[symbol] = {}
+                            
+                        self._underlying_data[symbol][target_date] = UnderlyingQuote(
+                            symbol=symbol,
+                            timestamp=datetime.combine(target_date, datetime.min.time().replace(hour=16)),
+                            open=open_price,
+                            high=high,
+                            low=low,
+                            close=close,
+                            volume=int(float(row['total_volume'])) if row.get('total_volume') else 0
+                        )
+                    except (ValueError, IndexError, decimal.InvalidOperation) as e:
+                        # logger.warning(f"Error parsing underlying row for {row.get('ticker')}: {e}")
+                        continue
+        
+        # 2. Load Option Data (hot-chains)
+        chains_file = data_path / f"hot-chains-{date_str}.csv"
+        if chains_file.exists():
+            with open(chains_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        opt_symbol = row['option_symbol']
+                        underlying, expiration, opt_type, strike = self._parse_option_symbol(opt_symbol)
+                        
+                        key = f"{underlying}_{expiration.isoformat()}"
+                        if key not in self._option_data:
+                            self._option_data[key] = {}
+                        if target_date not in self._option_data[key]:
+                            self._option_data[key][target_date] = []
+                            
+                        bid = Decimal(row['bid'])
+                        ask = Decimal(row['ask'])
+                        mid = (bid + ask) / 2
+                        
+                        # Parse IV safely
+                        iv = float(row['iv']) if row.get('iv') and row['iv'] != '' else None
+                        
+                        self._option_data[key][target_date].append(OptionQuote(
+                            underlying=underlying,
+                            expiration=expiration,
+                            strike=strike,
+                            option_type=opt_type,
+                            timestamp=datetime.combine(target_date, datetime.min.time().replace(hour=16)),
+                            bid=bid,
+                            ask=ask,
+                            mid=mid,
+                            last=Decimal(row['close']) if row.get('close') else None,
+                            iv=iv,
+                            volume=int(float(row.get('volume', 0))),
+                            open_interest=int(float(row.get('open_interest', 0)))
+                        ))
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Error parsing option row: {e}")
+                        continue
+                        
+        self._loaded_dates.add(target_date)
+
+    def get_option_quote(
+        self,
+        underlying: str,
+        expiration: date,
+        strike: Decimal,
+        option_type: str,
+        as_of: datetime
+    ) -> Optional[OptionQuote]:
+        """Get option quote from UWD CSV data."""
+        trade_date = as_of.date()
+        self._load_date(trade_date)
+        
+        key = f"{underlying}_{expiration.isoformat()}"
+        if key not in self._option_data:
+            return None
+            
+        if trade_date not in self._option_data[key]:
+            return None
+            
+        for quote in self._option_data[key][trade_date]:
+            if quote.strike == strike and quote.option_type == option_type.upper():
+                return quote
+                
+        return None
+    
+    def get_underlying_quote(
+        self,
+        symbol: str,
+        as_of: datetime
+    ) -> Optional[UnderlyingQuote]:
+        """Get underlying quote from UWD CSV data."""
+        trade_date = as_of.date()
+        self._load_date(trade_date)
+        
+        if symbol not in self._underlying_data:
+            return None
+            
+        return self._underlying_data[symbol].get(trade_date)
+    
+    def get_option_chain(
+        self,
+        underlying: str,
+        expiration: date,
+        as_of: datetime
+    ) -> List[OptionQuote]:
+        """Get option chain from UWD CSV data."""
+        trade_date = as_of.date()
+        self._load_date(trade_date)
+        
+        key = f"{underlying}_{expiration.isoformat()}"
+        if key not in self._option_data:
+            return []
+            
+        return self._option_data[key].get(trade_date, [])
+    
+    def get_price_history(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        interval: str = '1d'
+    ) -> List[PriceBar]:
+        """Get price history from UWD CSV data."""
+        # Load all dates in range
+        current = start_date
+        while current <= end_date:
+            self._load_date(current)
+            current += timedelta(days=1)
+            
         if symbol not in self._underlying_data:
             return []
             
