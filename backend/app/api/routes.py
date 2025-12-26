@@ -21,6 +21,10 @@ from app.plans.build_plan_v0 import build_plan
 from app.stability.report_v1 import build_stability_snapshot
 from app.utils.hashing import sha256_file
 from app.utils.time import parse_date
+from app.backtest.config import BacktestConfig
+from app.backtest.engine import OptionsBacktester
+from app.backtest.data_provider import MockDataProvider
+from app.db.models import BacktestRun, SimulatedTrade, DailyEquityCurve
 
 router = APIRouter()
 
@@ -482,3 +486,97 @@ def post_outcome(
         db.add(outcome)
     db.commit()
     return {"outcome_id": str(outcome.outcome_id)}
+
+
+# Backtesting Routes
+
+@router.post("/backtest/run")
+def run_backtest(
+    config: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Run a backtest with the provided configuration.
+    """
+    try:
+        # Convert dict to BacktestConfig
+        # We need to handle date parsing from strings
+        if 'start_date' in config and isinstance(config['start_date'], str):
+            config['start_date'] = parse_date(config['start_date'])
+        if 'end_date' in config and isinstance(config['end_date'], str):
+            config['end_date'] = parse_date(config['end_date'])
+            
+        bt_config = BacktestConfig.from_dict(config)
+        
+        # Initialize engine with mock data for now
+        # In production, we'd choose provider based on config
+        data_provider = MockDataProvider()
+        
+        engine = OptionsBacktester(bt_config, data_provider, db)
+        run_record = engine.run()
+        
+        return {"run_id": str(run_record.run_id), "status": run_record.status}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backtest/{run_id}")
+def get_backtest_results(
+    run_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get summary results for a backtest run."""
+    run = db.query(BacktestRun).filter(BacktestRun.run_id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Backtest run not found")
+        
+    return {
+        "id": str(run.run_id),
+        "strategy": run.strategy_version,
+        "status": run.status,
+        "metrics": run.performance_summary,
+        "dates": {
+            "start": run.start_date,
+            "end": run.end_date
+        }
+    }
+
+
+@router.get("/backtest/{run_id}/trades")
+def get_backtest_trades(
+    run_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get list of trades for a backtest run."""
+    trades = db.query(SimulatedTrade).filter(SimulatedTrade.backtest_run_id == run_id).all()
+    return [
+        {
+            "symbol": t.symbol,
+            "entry_date": t.entry_date,
+            "exit_date": t.exit_date,
+            "type": t.option_type,
+            "strike": float(t.strike),
+            "pnl": float(t.pnl),
+            "pnl_pct": float(t.pnl_pct),
+            "reason": t.exit_reason.value
+        }
+        for t in trades
+    ]
+
+
+@router.get("/backtest/{run_id}/equity")
+def get_backtest_equity(
+    run_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get daily equity curve for a backtest run."""
+    curve = db.query(DailyEquityCurve).filter(DailyEquityCurve.backtest_run_id == run_id).order_by(DailyEquityCurve.date).all()
+    return [
+        {
+            "date": c.date,
+            "equity": float(c.portfolio_value),
+            "drawdown_pct": float(c.drawdown_pct)
+        }
+        for c in curve
+    ]

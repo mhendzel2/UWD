@@ -45,15 +45,15 @@ class OptionsBacktester:
         
         # State
         self.current_date: date = config.start_date
-        self.cash: Decimal = config.initial_capital
-        self.equity: Decimal = config.initial_capital
+        self.cash: Decimal = Decimal(str(config.initial_capital))
+        self.equity: Decimal = Decimal(str(config.initial_capital))
         self.positions: List[SimulatedPositionState] = []
         self.closed_trades: List[SimulatedTrade] = []
         self.equity_curve: List[DailyEquityCurve] = []
         self.run_id: Optional[uuid.UUID] = None
         
         # Performance tracking
-        self.high_water_mark: Decimal = config.initial_capital
+        self.high_water_mark: Decimal = Decimal(str(config.initial_capital))
         self.drawdown: Decimal = Decimal("0")
         
     def run(self) -> BacktestRun:
@@ -67,7 +67,7 @@ class OptionsBacktester:
         
         # Create run record
         run_record = BacktestRun(
-            strategy_name=self.config.strategy_name,
+            strategy_version=self.config.strategy_version,
             start_date=self.config.start_date,
             end_date=self.config.end_date,
             initial_capital=self.config.initial_capital,
@@ -77,7 +77,7 @@ class OptionsBacktester:
         self.db.add(run_record)
         self.db.commit()
         self.db.refresh(run_record)
-        self.run_id = run_record.id
+        self.run_id = run_record.run_id
         
         try:
             # Main simulation loop
@@ -92,7 +92,7 @@ class OptionsBacktester:
                 
             # Close any remaining open positions at end of backtest
             self._close_all_positions(
-                exit_reason=ExitReason.EXPIRATION, 
+                exit_reason=ExitReason.END_OF_BACKTEST, 
                 notes="End of backtest"
             )
             
@@ -144,7 +144,7 @@ class OptionsBacktester:
             
             # Check expiration
             if trade_date >= position.expiration:
-                self._close_position(position, quote.mid, trade_date, ExitReason.EXPIRATION)
+                self._close_position(position, quote.mid, trade_date, ExitReason.TIME_EXIT)
                 continue
                 
             # Check stop loss
@@ -154,14 +154,14 @@ class OptionsBacktester:
                 continue
                 
             # Check take profit
-            if self.config.take_profit_pct and pnl_pct >= self.config.take_profit_pct:
-                self._close_position(position, quote.mid, trade_date, ExitReason.TAKE_PROFIT)
+            if self.config.profit_target_pct and pnl_pct >= self.config.profit_target_pct:
+                self._close_position(position, quote.mid, trade_date, ExitReason.PROFIT_TARGET)
                 continue
                 
-            # Check DTE exit
-            dte = (position.expiration - trade_date).days
-            if self.config.exit_dte and dte <= self.config.exit_dte:
-                self._close_position(position, quote.mid, trade_date, ExitReason.SIGNAL)
+            # Check holding period
+            holding_days = (trade_date - position.entry_date).days
+            if self.config.max_hold_days and holding_days >= self.config.max_hold_days:
+                self._close_position(position, quote.mid, trade_date, ExitReason.TIME_EXIT)
                 continue
                 
     def _process_signals(self, trade_date: date):
@@ -177,7 +177,7 @@ class OptionsBacktester:
             return
             
         # Check max positions
-        if len(self.positions) >= self.config.max_positions:
+        if len(self.positions) >= self.config.max_open_positions:
             return
             
         # Fetch signals from DB (simplified)
@@ -319,7 +319,7 @@ class OptionsBacktester:
         
         # Create trade record
         trade = SimulatedTrade(
-            run_id=self.run_id,
+            backtest_run_id=self.run_id,
             symbol=position.underlying,
             entry_date=position.entry_date,
             exit_date=trade_date,
@@ -391,12 +391,13 @@ class OptionsBacktester:
         
         # Record daily curve
         daily_stat = DailyEquityCurve(
-            run_id=self.run_id,
+            backtest_run_id=self.run_id,
             date=trade_date,
-            equity=total_equity,
-            cash=self.cash,
+            portfolio_value=total_equity,
+            cash_balance=self.cash,
             drawdown_pct=drawdown * 100,
-            open_positions=len(self.positions)
+            open_positions_count=len(self.positions),
+            peak_value=self.high_water_mark
         )
         self.db.add(daily_stat)
         self.equity_curve.append(daily_stat)
@@ -410,23 +411,12 @@ class OptionsBacktester:
         calc = PerformanceCalculator(
             trades=self.closed_trades,
             equity_curve=self.equity_curve,
-            initial_capital=self.config.initial_capital
+            initial_capital=float(self.config.initial_capital)
         )
         metrics = calc.calculate()
         
         # Update run record with metrics
-        run_record.final_equity = self.equity
-        run_record.total_return_pct = metrics.total_return_pct
-        run_record.cagr = metrics.cagr
-        run_record.sharpe_ratio = metrics.sharpe_ratio
-        run_record.sortino_ratio = metrics.sortino_ratio
-        run_record.max_drawdown_pct = metrics.max_drawdown_pct
-        run_record.win_rate = metrics.win_rate
-        run_record.profit_factor = metrics.profit_factor
-        run_record.total_trades = metrics.total_trades
+        run_record.performance_summary = metrics.to_dict()
         run_record.status = "COMPLETED"
-        
-        # Store detailed metrics in JSON field if needed
-        # run_record.metrics = metrics.to_dict()
         
         self.db.commit()

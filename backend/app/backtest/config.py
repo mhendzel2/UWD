@@ -28,6 +28,7 @@ class BacktestConfig:
     
     # Capital settings
     initial_capital: float = 100_000.0
+    min_cash_buffer: float = 1000.0  # Minimum cash to keep available
     
     # Position sizing
     max_position_size_pct: float = 0.05  # Max 5% of portfolio per trade
@@ -35,6 +36,7 @@ class BacktestConfig:
     min_position_size: int = 1  # Minimum contracts per trade
     
     # Strategy selection
+    strategy_name: str = "Default Strategy"
     strategy_version: str = "v1_ensemble"
     
     # Entry filters
@@ -92,9 +94,11 @@ class BacktestConfig:
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "initial_capital": self.initial_capital,
+            "min_cash_buffer": self.min_cash_buffer,
             "max_position_size_pct": self.max_position_size_pct,
             "max_open_positions": self.max_open_positions,
             "min_position_size": self.min_position_size,
+            "strategy_name": self.strategy_name,
             "strategy_version": self.strategy_version,
             "min_confidence": self.min_confidence,
             "allowed_regimes": self.allowed_regimes,

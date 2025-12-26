@@ -18,16 +18,17 @@ depends_on = None
 
 def upgrade() -> None:
     # Create exit_reason enum
-    exit_reason = sa.Enum(
+    exit_reason_values = [
         "PROFIT_TARGET",
         "STOP_LOSS",
         "TIME_EXIT",
         "END_OF_DAY",
         "END_OF_BACKTEST",
-        "MANUAL",
-        name="exit_reason",
-    )
-    exit_reason.create(op.get_bind(), checkfirst=True)
+        "MANUAL"
+    ]
+    # Explicitly create the type if it doesn't exist
+    exit_reason_enum = postgresql.ENUM(*exit_reason_values, name="exit_reason")
+    exit_reason_enum.create(op.get_bind(), checkfirst=True)
 
     # Create backtest_runs table
     op.create_table(
@@ -76,7 +77,7 @@ def upgrade() -> None:
         sa.Column("exit_timestamp", sa.DateTime(), nullable=True),
         sa.Column("exit_price_stock", sa.Numeric(12, 4), nullable=True),
         sa.Column("exit_price_option", sa.Numeric(12, 4), nullable=True),
-        sa.Column("exit_reason", exit_reason, nullable=True),
+        sa.Column("exit_reason", postgresql.ENUM(*exit_reason_values, name="exit_reason", create_type=False), nullable=True),
         # P&L
         sa.Column("pnl_absolute", sa.Numeric(14, 2), nullable=True),
         sa.Column("pnl_percentage", sa.Numeric(10, 6), nullable=True),
