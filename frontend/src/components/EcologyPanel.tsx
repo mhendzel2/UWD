@@ -32,11 +32,15 @@ const EcologyPanel: React.FC<Props> = ({ entries }) => {
             <th>Intent Profile</th>
             <th>Tail Risk</th>
             <th>Drawdown Shock</th>
+            <th>Timing</th>
+            <th>Key Strikes</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((e) => {
             const state = e.ecology_state || {};
+            const walls = state.strike_levels?.oi_walls || [];
+            const wallText = walls.slice(0, 2).map((w: any) => `$${w.strike}`).join(", ");
             return (
               <tr key={e.underlying}>
                 <td>{e.underlying}</td>
@@ -46,6 +50,8 @@ const EcologyPanel: React.FC<Props> = ({ entries }) => {
                 <td>{state.intent_profile || "n/a"}</td>
                 <td>{state.tail_risk_flag ? "YES" : "no"}</td>
                 <td>{state.drawdown_shock_active ? "active" : "off"}</td>
+                <td>{state.timing_profile?.timing_profile?.label || state.timing_profile?.label || "n/a"}</td>
+                <td>{wallText || "n/a"}</td>
               </tr>
             );
           })}
@@ -61,11 +67,40 @@ const EcologyPanel: React.FC<Props> = ({ entries }) => {
                 {(state.explanation_bullets || []).map((b: string) => (
                   <li key={b}>{b}</li>
                 ))}
+                {state.timing_profile?.timing_profile?.label && <li>Timing: {state.timing_profile.timing_profile.label}</li>}
+                {state.strike_levels?.oi_walls && (
+                  <li>
+                    OI walls:{" "}
+                    {state.strike_levels.oi_walls
+                      .slice(0, 3)
+                      .map((w: any) => `$${w.strike} (oi ${w.total_oi})`)
+                      .join(", ")}
+                  </li>
+                )}
               </ul>
             </div>
           );
         })}
       </div>
+      {entries[0]?.ecology_state?.market_overlays && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #eee", paddingTop: 8 }}>
+          <strong>Market Sentiment:</strong>{" "}
+          {(() => {
+            const m = entries[0].ecology_state.market_overlays.market_sentiment || {};
+            return `PCR ${m.put_call_ratio?.toFixed ? m.put_call_ratio.toFixed(2) : m.put_call_ratio || "n/a"}, Net Prem ${m.net_premium?.toFixed ? m.net_premium.toFixed(0) : m.net_premium || 0}`;
+          })()}
+          <div style={{ marginTop: 4 }}>
+            <strong>Sector Flows:</strong>
+            <ul>
+              {Object.entries(entries[0].ecology_state.market_overlays.sector_flows || {}).map(([sec, vals]: any) => (
+                <li key={sec}>
+                  {sec}: net {vals.net_premium?.toFixed ? vals.net_premium.toFixed(0) : vals.net_premium || 0}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

@@ -46,6 +46,6 @@ From `backend`: `pytest`.
 ## Design notes
 - Regime-first logic with conservative boolean rules (see `app/features/constants_v0.py` and `app/regime/classify_v0.py`); v1 adds persistence metrics and ensemble voting without ML or threshold tuning.
 - Daily Briefs are discovery-only and marked as “candidates” requiring regime permission; no execution commands are emitted.
-- Ecology panel is interpretability-focused (dominant horizon, disagreement, tail-risk flags) and feeds plan modifiers, not alpha.
+- Ecology panel is interpretability-focused (dominant horizon, disagreement, timing profile, strike-level walls/pockets, sector/market overlays, tail-risk flags) and feeds plan modifiers, not alpha.
 - Ensemble horizon weights update slowly (weekly) and only after at least 12 labeled Fridays; weights are floored and change-limited.
 - Orthogonal datasets are preserved as JSONB on import; per-underlying aggregates feed the feature builders. All structured fields use UUID primary keys and JSONB payloads where appropriate.

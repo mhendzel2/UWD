@@ -39,6 +39,7 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
           <th>Premium Imbalance</th>
           <th>IV Rank</th>
           <th>Regime OK?</th>
+          <th>Key Strikes</th>
         </tr>
       </thead>
       <tbody>
@@ -51,6 +52,12 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
             <td>{e.premium_imbalance}</td>
             <td>{typeof e.iv_rank === "number" ? e.iv_rank.toFixed(3) : e.iv_rank}</td>
             <td>{regimeMap["SPX"] || regimeMap["SPXW"] || "n/a"}</td>
+            <td>
+              {(e.strike_levels?.oi_walls || [])
+                .slice(0, 2)
+                .map((w: any) => `$${w.strike}`)
+                .join(", ") || "n/a"}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -66,6 +73,7 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
           <th>Implied Move %</th>
           <th>Structures</th>
           <th>Permission</th>
+          <th>Key Strikes</th>
         </tr>
       </thead>
       <tbody>
@@ -76,6 +84,12 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
             <td>{e.implied_move_perc}</td>
             <td>{Array.isArray(e.suggested_structures) ? e.suggested_structures.join(", ") : e.suggested_structures}</td>
             <td>{e.requires_regime_permission ? "Yes" : "No"}</td>
+            <td>
+              {(e.strike_levels?.oi_walls || [])
+                .slice(0, 2)
+                .map((w: any) => `$${w.strike}`)
+                .join(", ") || "n/a"}
+            </td>
           </tr>
         ))}
       </tbody>

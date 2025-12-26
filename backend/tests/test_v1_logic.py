@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.briefs import generate_v1 as briefs
+from app.analysis import strike_analysis
 from app.ecology import compute_v0 as ecology
 from app.features import build_v1
 from app.regime import classify_v1_ensemble as ensemble
@@ -88,3 +89,21 @@ def test_migration_revision_present():
         content = f.read()
     assert "daily_briefs" in content
     assert "ensemble_decisions" in content
+
+
+def test_strike_analysis_top_levels():
+    oi_rows = [
+        {"underlying_symbol": "SPX", "strike": "4800", "option_type": "call", "curr_oi": "10000"},
+        {"underlying_symbol": "SPX", "strike": "4700", "option_type": "put", "curr_oi": "9000"},
+    ]
+    hot_rows = [
+        {"ticker": "SPX", "strike": "4800", "option_type": "call", "premium": "500000"},
+    ]
+    bot_rows = [
+        {"underlying_symbol": "SPX", "strike": "4700", "option_type": "put", "premium": "250000", "gamma": "1.2", "delta": "-0.4", "side": "bid"},
+    ]
+    levels = strike_analysis.compute_strike_levels(oi_rows, hot_rows, bot_rows, top_n=3)
+    spx_levels = levels.get("SPX")
+    assert spx_levels
+    assert spx_levels["oi_walls"][0]["strike"] == 4800.0
+    assert spx_levels["premium_pockets"][0]["strike"] == 4800.0

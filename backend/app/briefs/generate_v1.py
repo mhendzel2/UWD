@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.analysis.strike_analysis import build_strike_levels_for_session
 from app.db import models
 from app.utils.underlying import derive_underlying
 
@@ -196,9 +197,12 @@ def _persist_brief(
 def generate_briefs(db: Session, session: models.Session, asof_date: date | None = None) -> list[models.DailyBrief]:
     asof_date = asof_date or session.date
     rows = _load_stock_rows(str(session.session_id), db)
+    strike_levels = build_strike_levels_for_session(db, str(session.session_id))
     universe = models.UnderlyingUniverse.MIXED
 
     bullish, bearish, flow_note = _build_flow_entries(rows, asof_date)
+    for entry in bullish + bearish:
+        entry["strike_levels"] = strike_levels.get((entry.get("ticker") or "").upper())
     flow_entries = {"bullish": bullish, "bearish": bearish}
     flow_brief = _persist_brief(
         db=db,
@@ -211,6 +215,8 @@ def generate_briefs(db: Session, session: models.Session, asof_date: date | None
     )
 
     vol_sell, sell_note = _build_vol_sell(rows, asof_date)
+    for entry in vol_sell:
+        entry["strike_levels"] = strike_levels.get((entry.get("ticker") or "").upper())
     vol_sell_brief = _persist_brief(
         db=db,
         session_id=str(session.session_id),
@@ -222,6 +228,8 @@ def generate_briefs(db: Session, session: models.Session, asof_date: date | None
     )
 
     vol_buy, buy_note = _build_vol_buy(rows, asof_date)
+    for entry in vol_buy:
+        entry["strike_levels"] = strike_levels.get((entry.get("ticker") or "").upper())
     vol_buy_brief = _persist_brief(
         db=db,
         session_id=str(session.session_id),

@@ -1,8 +1,10 @@
+from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.analysis.strike_analysis import build_strike_levels_for_session
 from app.db import models
 from app.utils.underlying import derive_underlying
 
@@ -13,10 +15,10 @@ DRAW_VOLUME_MULT = 1.2
 PROXY_UNDERLYINGS = {"SPY", "QQQ", "SPX", "SPXW"}
 
 
-def _load_stock_rows(session_id: str, db: Session) -> List[Dict[str, Any]]:
+def _load_rows(session_id: str, db: Session, source: models.RawSource) -> List[Dict[str, Any]]:
     files = (
         db.query(models.RawFile)
-        .filter(models.RawFile.session_id == session_id, models.RawFile.source == models.RawSource.STOCK_SCREENER)
+        .filter(models.RawFile.session_id == session_id, models.RawFile.source == source)
         .all()
     )
     rows: list[dict[str, Any]] = []
@@ -51,6 +53,50 @@ def _drawdown_flag(rows: List[Dict[str, Any]]) -> Tuple[bool, Dict[str, Any]]:
         if pct <= DRAW_MIN_DROP and volume_ratio >= DRAW_VOLUME_MULT:
             return True, context
     return False, context
+
+
+def _bucket_from_ts(ts: str | None) -> str | None:
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    hhmm = dt.hour + dt.minute / 60
+    if 9.5 <= hhmm < 11:
+        return "MORNING"
+    if 11 <= hhmm < 15:
+        return "MIDDAY"
+    if 15 <= hhmm <= 16.1:
+        return "AFTERNOON"
+    return None
+
+
+def _timing_profile(hot_rows: List[Dict[str, Any]], bot_rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    buckets: dict[str, dict[str, float]] = {
+        "MORNING": {"premium": 0.0, "sweeps": 0.0},
+        "MIDDAY": {"premium": 0.0, "sweeps": 0.0},
+        "AFTERNOON": {"premium": 0.0, "sweeps": 0.0},
+    }
+    for row in hot_rows:
+        bucket = _bucket_from_ts(row.get("tape_time") or row.get("timestamp"))
+        if not bucket or bucket not in buckets:
+            continue
+        buckets[bucket]["premium"] += _parse_float(row.get("premium"))
+        buckets[bucket]["sweeps"] += _parse_float(row.get("sweep_volume"))
+    for row in bot_rows:
+        bucket = _bucket_from_ts(row.get("executed_at") or row.get("timestamp"))
+        if not bucket or bucket not in buckets:
+            continue
+        buckets[bucket]["premium"] += _parse_float(row.get("premium"))
+    # choose dominant timing profile
+    dominant = max(buckets.items(), key=lambda kv: kv[1]["premium"])[0]
+    profile = f"{dominant}_MOMENTUM" if buckets[dominant]["premium"] > 0 else "NONE"
+    buckets["timing_profile"] = {"label": profile}
+    return buckets
 
 
 def _dominant_horizon(feature: models.FeaturesUnderlyingDay) -> models.DominantHorizonHint:
@@ -137,12 +183,46 @@ def _explanation(feature: models.FeaturesUnderlyingDay, regime: models.RegimeLab
     return bullets[:7] if bullets else ["Mixed evidence; monitor only."]
 
 
+def _market_sentiment(stock_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sector_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"call_premium": 0.0, "put_premium": 0.0})
+    call_prem = 0.0
+    put_prem = 0.0
+    for row in stock_rows:
+        sector = (row.get("sector") or "UNKNOWN").upper()
+        cp = _parse_float(row.get("call_premium"))
+        pp = _parse_float(row.get("put_premium"))
+        call_prem += cp
+        put_prem += pp
+        sector_totals[sector]["call_premium"] += cp
+        sector_totals[sector]["put_premium"] += pp
+    sentiment = {
+        "call_premium": call_prem,
+        "put_premium": put_prem,
+        "net_premium": call_prem - put_prem,
+        "put_call_ratio": (put_prem / call_prem) if call_prem else None,
+    }
+    sectors = {
+        k: {
+            "call_premium": v["call_premium"],
+            "put_premium": v["put_premium"],
+            "net_premium": v["call_premium"] - v["put_premium"],
+        }
+        for k, v in sector_totals.items()
+    }
+    return {"market_sentiment": sentiment, "sector_flows": sectors}
+
+
 def compute_ecology_state(
     db: Session, session: models.Session, asof_date: date | None = None
 ) -> list[models.RegimeDecision]:
     asof_date = asof_date or session.date
-    stock_rows = _load_stock_rows(str(session.session_id), db)
+    stock_rows = _load_rows(str(session.session_id), db, models.RawSource.STOCK_SCREENER)
+    hot_rows = _load_rows(str(session.session_id), db, models.RawSource.HOT_CHAINS)
+    bot_rows = _load_rows(str(session.session_id), db, models.RawSource.BOT_EOD)
     drawdown_flag, drawdown_context = _drawdown_flag(stock_rows)
+    timing = _timing_profile(hot_rows, bot_rows)
+    strike_levels = build_strike_levels_for_session(db, str(session.session_id))
+    overlays = _market_sentiment(stock_rows)
 
     decisions = (
         db.query(models.RegimeDecision)
@@ -166,6 +246,9 @@ def compute_ecology_state(
             "tail_risk_flag": tail_risk,
             "drawdown_shock_active": drawdown_flag,
             "drawdown_inputs": drawdown_context,
+            "timing_profile": timing,
+            "strike_levels": strike_levels.get(decision.underlying.upper()) if strike_levels else None,
+            "market_overlays": overlays,
             "explanation_bullets": _explanation(feature, decision.regime_label, tail_risk, drawdown_flag),
             "plan_modifiers": {
                 "confidence_adjustment": "DOWN" if tail_risk or drawdown_flag else "NONE",
