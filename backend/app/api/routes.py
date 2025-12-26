@@ -266,9 +266,17 @@ def compute_ecology_v0(
         raise HTTPException(status_code=400, detail=str(exc))
 
     updated = compute_ecology_state(db, session, parsed_date)
+    payload = [
+        {
+            "underlying": d.underlying,
+            "dominant_horizon_hint": d.dominant_horizon_hint.value if d.dominant_horizon_hint else None,
+            "ecology_state": d.ecology_state,
+        }
+        for d in updated
+    ]
     if updated:
         notify_decision({"type": "ecology", "session_id": session_id, "count": len(updated)})
-    return {"updated": len(updated)}
+    return {"updated": len(updated), "ecology": payload}
 
 
 @router.post("/briefs/generate_v1")
@@ -379,6 +387,61 @@ def get_summary(session_id: str, db: Session = Depends(get_db)):
         "features": [f"{f.underlying}:{f.feature_version}" for f in features],
         "regimes": [r.regime_label.value for r in regimes],
         "plans": [p.plan_type.value for p in plans],
+    }
+
+
+@router.get("/sessions/{session_id}/briefs")
+def get_briefs(session_id: str, db: Session = Depends(get_db)):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    briefs = (
+        db.query(models.DailyBrief)
+        .filter(models.DailyBrief.session_id == session_id)
+        .order_by(models.DailyBrief.date.desc(), models.DailyBrief.generated_at.desc())
+        .all()
+    )
+    return {"briefs": [_serialize_brief(b) for b in briefs]}
+
+
+@router.get("/sessions/{session_id}/ensemble")
+def get_ensemble(session_id: str, db: Session = Depends(get_db)):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    decisions = (
+        db.query(models.EnsembleDecision)
+        .filter(models.EnsembleDecision.session_id == session_id)
+        .order_by(models.EnsembleDecision.asof_date.desc(), models.EnsembleDecision.underlying.asc())
+        .all()
+    )
+    return {"ensembles": [_serialize_ensemble(d) for d in decisions]}
+
+
+@router.get("/sessions/{session_id}/regimes")
+def get_regimes(session_id: str, db: Session = Depends(get_db)):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    decisions = (
+        db.query(models.RegimeDecision)
+        .filter(models.RegimeDecision.session_id == session_id)
+        .order_by(models.RegimeDecision.asof_date.desc(), models.RegimeDecision.underlying.asc())
+        .all()
+    )
+    return {
+        "regimes": [
+            {
+                "underlying": d.underlying,
+                "asof_date": str(d.asof_date),
+                "regime_label": d.regime_label.value if d.regime_label else None,
+                "confidence_tier": d.confidence_tier.value if d.confidence_tier else None,
+                "decision_version": d.decision_version,
+                "dominant_horizon_hint": d.dominant_horizon_hint.value if d.dominant_horizon_hint else None,
+                "ecology_state": d.ecology_state,
+            }
+            for d in decisions
+        ]
     }
 
 
