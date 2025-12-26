@@ -128,7 +128,7 @@ class RawFile(Base):
 class FeaturesUnderlyingDay(Base):
     __tablename__ = "features_underlying_day"
     __table_args__ = (
-        UniqueConstraint("session_id", "underlying", "asof_date", name="uq_features_day"),
+        UniqueConstraint("session_id", "underlying", "asof_date", "feature_version", name="uq_features_day"),
     )
 
     feature_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

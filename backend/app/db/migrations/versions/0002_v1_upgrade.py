@@ -21,6 +21,13 @@ def upgrade() -> None:
     underlying_universe.create(op.get_bind(), checkfirst=True)
     dominant_horizon_hint.create(op.get_bind(), checkfirst=True)
 
+    op.drop_constraint("uq_features_day", "features_underlying_day", type_="unique")
+    op.create_unique_constraint(
+        "uq_features_day",
+        "features_underlying_day",
+        ["session_id", "underlying", "asof_date", "feature_version"],
+    )
+
     op.add_column("features_underlying_day", sa.Column("oi_persistence_3d", sa.Numeric(10, 4), nullable=True))
     op.add_column("features_underlying_day", sa.Column("hot_chain_persistence_3d", sa.Numeric(10, 4), nullable=True))
     op.add_column("features_underlying_day", sa.Column("intent_persistence_3d", sa.Numeric(10, 4), nullable=True))
@@ -91,6 +98,12 @@ def downgrade() -> None:
     op.drop_column("regime_decisions", "ecology_state")
     op.drop_column("regime_decisions", "dominant_horizon_hint")
 
+    op.drop_constraint("uq_features_day", "features_underlying_day", type_="unique")
+    op.create_unique_constraint(
+        "uq_features_day",
+        "features_underlying_day",
+        ["session_id", "underlying", "asof_date"],
+    )
     op.drop_column("features_underlying_day", "volume_to_avg30")
     op.drop_column("features_underlying_day", "range_pct_5d_std")
     op.drop_column("features_underlying_day", "range_pct_5d_mean")
