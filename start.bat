@@ -1,0 +1,13 @@
+@echo off
+echo Starting UWD System...
+
+echo Activating virtual environment...
+call venv\Scripts\activate
+
+echo Starting Backend Server...
+start "UWD Backend" cmd /k "cd backend && uvicorn app.main:app --reload"
+
+echo Starting Frontend Client...
+start "UWD Frontend" cmd /k "cd frontend && npm run dev"
+
+echo System started.
