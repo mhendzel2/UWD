@@ -1,18 +1,24 @@
 import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
+from app.api.ws import notify_decision, notify_log
+from app.briefs.generate_v1 import generate_briefs
 from app.db.engine import SessionLocal
 from app.db import models
+from app.ecology.compute_v0 import compute_ecology_state
+from app.features.build_v0 import build_feature_row
+from app.features.build_v1 import build_feature_row_v1
 from app.ingest import oi_diff, bot_eod, hot_chains, darkpool_eod, stock_screener_eod
 from app.ingest.types import ParsedCSV
-from app.features.build_v0 import build_feature_row
+from app.regime.classify_v1_ensemble import classify_ensemble
 from app.regime.classify_v0 import classify
 from app.plans.build_plan_v0 import build_plan
+from app.stability.report_v1 import build_stability_snapshot
 from app.utils.hashing import sha256_file
 from app.utils.time import parse_date
 
@@ -130,6 +136,42 @@ def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, 
     return per_underlying
 
 
+def _serialize_brief(brief: models.DailyBrief) -> Dict[str, Any]:
+    return {
+        "brief_id": str(brief.brief_id),
+        "session_id": str(brief.session_id),
+        "date": str(brief.date),
+        "brief_type": brief.brief_type.value if brief.brief_type else None,
+        "underlying_universe": brief.underlying_universe.value if brief.underlying_universe else None,
+        "entries": brief.entries,
+        "generated_at": brief.generated_at.isoformat() if brief.generated_at else None,
+        "brief_version": brief.brief_version,
+    }
+
+
+def _serialize_ensemble(decision: models.EnsembleDecision) -> Dict[str, Any]:
+    return {
+        "ensemble_id": str(decision.ensemble_id),
+        "session_id": str(decision.session_id),
+        "underlying": decision.underlying,
+        "asof_date": str(decision.asof_date),
+        "ensemble_label": decision.ensemble_label.value if decision.ensemble_label else None,
+        "ensemble_confidence": float(decision.ensemble_confidence) if decision.ensemble_confidence is not None else None,
+        "horizon_weights": decision.horizon_weights,
+        "component_votes": decision.component_votes,
+        "stability_metrics": decision.stability_metrics,
+        "ensemble_version": decision.ensemble_version,
+        "computed_at": decision.computed_at.isoformat() if decision.computed_at else None,
+    }
+
+
+def _copy_attrs(source: Any, target: Any):
+    for key, value in source.__dict__.items():
+        if key.startswith("_"):
+            continue
+        setattr(target, key, value)
+
+
 @router.post("/compute/v0")
 def compute_v0(
     session_id: str = Form(...),
@@ -207,6 +249,121 @@ def compute_v0(
     )
     db.commit()
     return {"decisions": decisions}
+
+
+@router.post("/compute/ecology_v0")
+def compute_ecology_v0(
+    session_id: str = Form(...),
+    asof_date: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        parsed_date = parse_date(asof_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    updated = compute_ecology_state(db, session, parsed_date)
+    if updated:
+        notify_decision({"type": "ecology", "session_id": session_id, "count": len(updated)})
+    return {"updated": len(updated)}
+
+
+@router.post("/briefs/generate_v1")
+def generate_briefs_v1(
+    session_id: str = Form(...),
+    asof_date: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        parsed_date = parse_date(asof_date) if asof_date else session.date
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        briefs = generate_briefs(db, session, parsed_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    db.add(
+        models.LogMessage(
+            session_id=session_id,
+            level=models.LogLevel.INFO,
+            message="Generated v1 briefs",
+            context={"count": len(briefs), "date": str(parsed_date)},
+        )
+    )
+    db.commit()
+    payload = [_serialize_brief(b) for b in briefs]
+    notify_decision({"type": "briefs", "session_id": session_id, "count": len(briefs)})
+    return {"briefs": payload}
+
+
+@router.post("/compute/v1")
+def compute_v1(
+    session_id: str = Form(...),
+    asof_date: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        parsed_date = parse_date(asof_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    per_underlying = _aggregate_for_session(session_id, db)
+    ensembles: list[Dict[str, Any]] = []
+    for underlying, aggregates in per_underlying.items():
+        feature_row = build_feature_row_v1(db, session_id, underlying, parsed_date, aggregates)
+        existing_feature = (
+            db.query(models.FeaturesUnderlyingDay)
+            .filter_by(session_id=session_id, underlying=underlying, asof_date=parsed_date, feature_version="v1")
+            .one_or_none()
+        )
+        if existing_feature:
+            _copy_attrs(feature_row, existing_feature)
+            feature_row = existing_feature
+        else:
+            db.add(feature_row)
+
+        ensemble_row = classify_ensemble(db, feature_row, parsed_date)
+        existing_ensemble = (
+            db.query(models.EnsembleDecision)
+            .filter_by(session_id=session_id, underlying=underlying, asof_date=parsed_date)
+            .one_or_none()
+        )
+        if existing_ensemble:
+            _copy_attrs(ensemble_row, existing_ensemble)
+            ensemble_row = existing_ensemble
+        else:
+            db.add(ensemble_row)
+        ensembles.append(
+            {
+                "underlying": underlying,
+                "ensemble_label": ensemble_row.ensemble_label.value,
+                "ensemble_confidence": ensemble_row.ensemble_confidence,
+                "horizon_weights": ensemble_row.horizon_weights,
+            }
+        )
+
+    db.add(
+        models.LogMessage(
+            session_id=session_id,
+            level=models.LogLevel.INFO,
+            message="Computed v1 features/ensemble",
+            context={"count": len(per_underlying)},
+        )
+    )
+    db.commit()
+    notify_decision({"type": "ensemble", "session_id": session_id, "count": len(ensembles)})
+    return {"ensembles": ensembles}
 
 
 @router.get("/sessions/{session_id}/summary")
