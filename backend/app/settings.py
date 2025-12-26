@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+psycopg2://uw_app:uw_password@localhost:5432/uw_eod"
+    database_url: str = "postgresql+psycopg2://uw_app:uw_password@127.0.0.1:5433/uw_eod"
     app_name: str = "UWD Regime EOD"
     log_level: str = "INFO"
 

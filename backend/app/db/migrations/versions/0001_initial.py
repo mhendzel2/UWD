@@ -22,15 +22,6 @@ def upgrade() -> None:
     log_level = sa.Enum("INFO", "WARN", "ERROR", name="log_level")
     outcome_label = sa.Enum("PIN_RANGE", "TREND", "MIXED", name="outcome_label")
 
-    strategy_mode.create(op.get_bind(), checkfirst=True)
-    raw_source.create(op.get_bind(), checkfirst=True)
-    parse_status.create(op.get_bind(), checkfirst=True)
-    regime_label.create(op.get_bind(), checkfirst=True)
-    confidence_tier.create(op.get_bind(), checkfirst=True)
-    plan_type.create(op.get_bind(), checkfirst=True)
-    log_level.create(op.get_bind(), checkfirst=True)
-    outcome_label.create(op.get_bind(), checkfirst=True)
-
     op.create_table(
         "sessions",
         sa.Column("session_id", postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),

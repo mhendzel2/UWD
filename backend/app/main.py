@@ -1,5 +1,6 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.routes import router as api_router
@@ -29,7 +30,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
-    _ = db.execute("SELECT 1")
+    _ = db.execute(text("SELECT 1"))
     return {"status": "ok"}
 
 
