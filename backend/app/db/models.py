@@ -295,3 +295,140 @@ class ModelWeights(Base):
     weights = Column(JSONB, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     version = Column(String(16), nullable=False, default="v1")
+
+
+# =============================================================================
+# Backtesting Tables
+# =============================================================================
+
+class ExitReason(str, Enum):
+    """Reasons for exiting a simulated trade"""
+    PROFIT_TARGET = "PROFIT_TARGET"
+    STOP_LOSS = "STOP_LOSS"
+    TIME_EXIT = "TIME_EXIT"
+    END_OF_DAY = "END_OF_DAY"
+    END_OF_BACKTEST = "END_OF_BACKTEST"
+    MANUAL = "MANUAL"
+
+
+class BacktestRun(Base):
+    """
+    Stores metadata for each complete backtesting run.
+    Allows comparison of different strategy versions over time.
+    """
+    __tablename__ = "backtest_runs"
+
+    run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    strategy_version = Column(String(64), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    initial_capital = Column(Numeric(14, 2), nullable=False, default=100000.0)
+    
+    # Configuration snapshot
+    parameters = Column(JSONB, nullable=False, default=dict)
+    
+    # Performance summary (populated after run completes)
+    performance_summary = Column(JSONB, nullable=True)
+    
+    # Status tracking
+    status = Column(String(32), nullable=False, default="RUNNING")
+    error_message = Column(Text, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    trades = relationship("SimulatedTrade", back_populates="backtest_run", cascade="all, delete-orphan")
+    equity_curve = relationship("DailyEquityCurve", back_populates="backtest_run", cascade="all, delete-orphan")
+
+
+class SimulatedTrade(Base):
+    """
+    Records every detail of each individual simulated trade.
+    Designed for deep analysis of trade performance including MFE/MAE.
+    """
+    __tablename__ = "simulated_trades"
+    __table_args__ = (
+        CheckConstraint("position_size > 0", name="ck_positive_position"),
+    )
+
+    trade_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    backtest_run_id = Column(UUID(as_uuid=True), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
+    
+    # Timing
+    signal_date = Column(Date, nullable=False)  # When signal was generated (EOD)
+    trade_date = Column(Date, nullable=False)   # When trade was executed
+    
+    # Instruments
+    underlying_symbol = Column(String(32), nullable=False)
+    option_symbol = Column(String(64), nullable=True)  # Null for stock-only backtests
+    
+    # Strategy identification
+    strategy_name = Column(String(64), nullable=False)
+    entry_reason = Column(Text, nullable=True)
+    
+    # Entry details
+    entry_timestamp = Column(DateTime, nullable=False)
+    entry_price_stock = Column(Numeric(12, 4), nullable=False)
+    entry_price_option = Column(Numeric(12, 4), nullable=True)
+    position_size = Column(Integer, nullable=False)
+    capital_at_risk = Column(Numeric(14, 2), nullable=False)
+    
+    # Exit details
+    exit_timestamp = Column(DateTime, nullable=True)
+    exit_price_stock = Column(Numeric(12, 4), nullable=True)
+    exit_price_option = Column(Numeric(12, 4), nullable=True)
+    exit_reason = Column(PgEnum(ExitReason, name="exit_reason"), nullable=True)
+    
+    # P&L metrics
+    pnl_absolute = Column(Numeric(14, 2), nullable=True)
+    pnl_percentage = Column(Numeric(10, 6), nullable=True)
+    
+    # MFE/MAE - Critical for trade analysis
+    max_favorable_excursion = Column(Numeric(10, 6), nullable=True)
+    max_adverse_excursion = Column(Numeric(10, 6), nullable=True)
+    
+    # Signal context snapshot (for post-analysis)
+    signal_snapshot = Column(JSONB, nullable=True)
+    
+    # Greeks at entry (for options)
+    greeks_at_entry = Column(JSONB, nullable=True)
+    
+    # Holding period
+    holding_minutes = Column(Integer, nullable=True)
+    
+    backtest_run = relationship("BacktestRun", back_populates="trades")
+
+
+class DailyEquityCurve(Base):
+    """
+    Tracks portfolio value over time for calculating portfolio-level
+    statistics and visualizing performance curves.
+    """
+    __tablename__ = "daily_equity_curve"
+    __table_args__ = (
+        UniqueConstraint("backtest_run_id", "date", name="uq_equity_curve_day"),
+    )
+
+    curve_point_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    backtest_run_id = Column(UUID(as_uuid=True), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False)
+    
+    # Portfolio state
+    portfolio_value = Column(Numeric(14, 2), nullable=False)
+    cash_balance = Column(Numeric(14, 2), nullable=False)
+    open_positions_value = Column(Numeric(14, 2), nullable=False, default=0)
+    open_positions_count = Column(Integer, nullable=False, default=0)
+    
+    # Daily metrics
+    daily_pnl = Column(Numeric(14, 2), nullable=False, default=0)
+    daily_return_pct = Column(Numeric(10, 6), nullable=True)
+    
+    # Drawdown tracking
+    peak_value = Column(Numeric(14, 2), nullable=False)
+    drawdown_pct = Column(Numeric(10, 6), nullable=False, default=0)
+    
+    # Trade counts for the day
+    trades_opened = Column(Integer, nullable=False, default=0)
+    trades_closed = Column(Integer, nullable=False, default=0)
+    
+    backtest_run = relationship("BacktestRun", back_populates="equity_curve")
