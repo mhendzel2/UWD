@@ -70,6 +70,25 @@ class OutcomeLabel(str, Enum):
     MIXED = "MIXED"
 
 
+class BriefType(str, Enum):
+    FLOW_SHORT_TERM = "FLOW_SHORT_TERM"
+    VOL_SELL_PREMIUM = "VOL_SELL_PREMIUM"
+    VOL_BUY_PREMIUM = "VOL_BUY_PREMIUM"
+
+
+class UnderlyingUniverse(str, Enum):
+    INDEX = "INDEX"
+    EQUITY = "EQUITY"
+    MIXED = "MIXED"
+
+
+class DominantHorizonHint(str, Enum):
+    SHORT = "SHORT"
+    MEDIUM = "MEDIUM"
+    LONG = "LONG"
+    MIXED = "MIXED"
+
+
 class Session(Base):
     __tablename__ = "sessions"
 
@@ -85,6 +104,8 @@ class Session(Base):
     regimes = relationship("RegimeDecision", back_populates="session", cascade="all, delete-orphan")
     plans = relationship("Plan", back_populates="session", cascade="all, delete-orphan")
     logs = relationship("LogMessage", back_populates="session", cascade="all, delete-orphan")
+    daily_briefs = relationship("DailyBrief", back_populates="session", cascade="all, delete-orphan")
+    ensembles = relationship("EnsembleDecision", back_populates="session", cascade="all, delete-orphan")
 
 
 class RawFile(Base):
@@ -139,6 +160,14 @@ class FeaturesUnderlyingDay(Base):
 
     # Numeric support payload
     numeric_context = Column(JSONB, nullable=True)
+    oi_persistence_3d = Column(Numeric(10, 4), nullable=True)
+    hot_chain_persistence_3d = Column(Numeric(10, 4), nullable=True)
+    intent_persistence_3d = Column(Numeric(10, 4), nullable=True)
+    regime_last = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=True)
+    regime_switch_rate_10d = Column(Numeric(10, 4), nullable=True)
+    range_pct_5d_mean = Column(Numeric(12, 6), nullable=True)
+    range_pct_5d_std = Column(Numeric(12, 6), nullable=True)
+    volume_to_avg30 = Column(Numeric(12, 6), nullable=True)
 
     session = relationship("Session", back_populates="features")
     regime = relationship("RegimeDecision", back_populates="feature", uselist=False)
@@ -160,6 +189,9 @@ class RegimeDecision(Base):
     conflicts = Column(JSONB, nullable=True)
     decision_version = Column(String(16), nullable=False, default="v0")
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    dominant_horizon_hint = Column(PgEnum(DominantHorizonHint, name="dominant_horizon_hint"), nullable=True)
+    ecology_state = Column(JSONB, nullable=True)
+    ecology_version = Column(String(16), nullable=False, default="v0")
 
     feature_id = Column(UUID(as_uuid=True), ForeignKey("features_underlying_day.feature_id", ondelete="CASCADE"), nullable=True)
 
@@ -216,3 +248,50 @@ class LogMessage(Base):
     context = Column(JSONB, nullable=True)
 
     session = relationship("Session", back_populates="logs")
+
+
+class DailyBrief(Base):
+    __tablename__ = "daily_briefs"
+
+    brief_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False)
+    brief_type = Column(PgEnum(BriefType, name="brief_type"), nullable=False)
+    underlying_universe = Column(PgEnum(UnderlyingUniverse, name="underlying_universe"), nullable=True)
+    entries = Column(JSONB, nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    brief_version = Column(Text, nullable=False, default="v1")
+
+    session = relationship("Session", back_populates="daily_briefs")
+
+
+class EnsembleDecision(Base):
+    __tablename__ = "ensemble_decisions"
+    __table_args__ = (
+        UniqueConstraint("session_id", "underlying", "asof_date", name="uq_ensemble_day"),
+    )
+
+    ensemble_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    underlying = Column(String(32), nullable=False)
+    asof_date = Column(Date, nullable=False)
+    ensemble_label = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=False)
+    ensemble_confidence = Column(Numeric(10, 4), nullable=True)
+    horizon_weights = Column(JSONB, nullable=True)
+    component_votes = Column(JSONB, nullable=True)
+    stability_metrics = Column(JSONB, nullable=True)
+    ensemble_version = Column(String(16), nullable=False, default="v1")
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    session = relationship("Session", back_populates="ensembles")
+
+
+class ModelWeights(Base):
+    __tablename__ = "model_weights"
+    __table_args__ = (UniqueConstraint("asof_date", name="uq_model_weights_date"),)
+
+    weights_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    asof_date = Column(Date, nullable=False)
+    weights = Column(JSONB, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    version = Column(String(16), nullable=False, default="v1")
