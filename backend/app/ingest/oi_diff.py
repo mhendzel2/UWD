@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from app.ingest.types import ParsedCSV
+from app.utils.underlying import derive_underlying
 from app.utils.csv_read import read_csv
 
 
@@ -19,7 +20,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
         "multileg_oi": 0.0,
     })
     for row in rows:
-        underlying = row.get("underlying") or row.get("ticker") or "UNKNOWN"
+        underlying = derive_underlying(row)
         try:
             metrics[underlying]["call_oi"] += float(row.get("call_oi", 0) or 0)
             metrics[underlying]["put_oi"] += float(row.get("put_oi", 0) or 0)

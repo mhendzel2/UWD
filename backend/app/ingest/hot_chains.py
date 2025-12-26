@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.ingest.types import ParsedCSV
 from app.utils.csv_read import read_csv
+from app.utils.underlying import derive_underlying
 
 
 def parse_hot_chains(path: Path) -> ParsedCSV:
@@ -19,7 +20,7 @@ def aggregate(rows: list[dict]) -> dict[str, dict[str, float]]:
         "sell_volume": 0.0,
     })
     for row in rows:
-        underlying = row.get("underlying") or row.get("ticker") or "UNKNOWN"
+        underlying = derive_underlying(row)
         try:
             turnover = float(row.get("notional", 0) or 0)
             sweep = int(row.get("sweep", 0) or 0)
