@@ -1,0 +1,11 @@
+﻿
+
+ComputerName     : 127.0.0.1
+RemoteAddress    : 127.0.0.1
+RemotePort       : 5432
+InterfaceAlias   : Loopback Pseudo-Interface 1
+SourceAddress    : 127.0.0.1
+TcpTestSucceeded : True
+
+
+
