@@ -1,5 +1,5 @@
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -641,6 +641,7 @@ def detect_outliers_from_session(
     iqr_multiplier: float = Form(1.5),
     earnings_days: int = Form(14),
     chain_pct: float = Form(0.20),
+    baseline_days: int = Form(0),
     db: Session = Depends(get_db),
 ):
     """
@@ -655,6 +656,17 @@ def detect_outliers_from_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    def _get_oi_rows_for_session(sid: str) -> list[dict]:
+        files_local = db.query(models.RawFile).filter(
+            models.RawFile.session_id == sid,
+            models.RawFile.source == models.RawSource.OI_DIFF,
+        ).all()
+        rows_local: list[dict] = []
+        for rf in files_local:
+            if rf.extras and "rows" in rf.extras:
+                rows_local.extend(rf.extras["rows"])
+        return rows_local
+
     # Get OI data from session's raw files
     files = db.query(models.RawFile).filter(
         models.RawFile.session_id == session_id,
@@ -665,22 +677,41 @@ def detect_outliers_from_session(
         raise HTTPException(status_code=404, detail="No OI data found for session")
     
     # Aggregate all OI rows
-    all_rows = []
-    for rf in files:
-        if rf.extras and "rows" in rf.extras:
-            all_rows.extend(rf.extras["rows"])
+    all_rows = _get_oi_rows_for_session(session_id)
     
     if not all_rows:
         raise HTTPException(status_code=404, detail="No OI rows found in session data")
     
+    baseline_rows: list[dict] = []
+    baseline_session_count = 0
+    if baseline_days and baseline_days > 0:
+        start = session.date - timedelta(days=baseline_days)
+        baseline_sessions = (
+            db.query(models.Session)
+            .filter(models.Session.date >= start, models.Session.date < session.date)
+            .order_by(models.Session.date.asc())
+            .all()
+        )
+        baseline_session_count = len(baseline_sessions)
+        for bs in baseline_sessions:
+            baseline_rows.extend(_get_oi_rows_for_session(str(bs.session_id)))
+
     # Run analysis
     results = analyze_from_session_data(
         all_rows,
         zscore_threshold=zscore_threshold,
         iqr_multiplier=iqr_multiplier,
         earnings_days=earnings_days,
-        chain_pct=chain_pct
+        chain_pct=chain_pct,
+        baseline_oi_data=baseline_rows if baseline_rows else None,
     )
+
+    if baseline_rows:
+        results["baseline"] = {
+            "days": baseline_days,
+            "sessions": baseline_session_count,
+            "rows": len(baseline_rows),
+        }
     
     return results
 

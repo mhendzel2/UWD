@@ -73,6 +73,7 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
   const [iqrMultiplier, setIqrMultiplier] = useState<string>("1.5");
   const [earningsDays, setEarningsDays] = useState<string>("14");
   const [chainPct, setChainPct] = useState<string>("0.2");
+  const [baselineDays, setBaselineDays] = useState<string>("0");
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
@@ -112,6 +113,7 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
       form.append("iqr_multiplier", iqrMultiplier);
       form.append("earnings_days", earningsDays);
       form.append("chain_pct", chainPct);
+      form.append("baseline_days", baselineDays);
 
       const res = await fetch(`${apiBase}/analysis/outliers/detect`, { method: "POST", body: form });
       if (!res.ok) {
@@ -126,7 +128,7 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
     } finally {
       setLoading(false);
     }
-  }, [apiBase, chainPct, earningsDays, iqrMultiplier, onLog, selectedSessionId, zscoreThreshold]);
+  }, [apiBase, baselineDays, chainPct, earningsDays, iqrMultiplier, onLog, selectedSessionId, zscoreThreshold]);
 
   const summary = useMemo(() => {
     if (!data) return null;
@@ -209,6 +211,10 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
       </div>
 
       <div className="row">
+        <label className="gridLabel">
+          Baseline lookback days (0=off)
+          <input value={baselineDays} onChange={(e) => setBaselineDays(e.target.value)} placeholder="0" />
+        </label>
         <button onClick={runDetection} disabled={loading || !selectedSessionId}>
           {loading ? "Running" : "Run Outlier Detection"}
         </button>

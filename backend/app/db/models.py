@@ -17,8 +17,9 @@ from sqlalchemy import (
     UniqueConstraint,
     JSON,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
+
+from app.db.types import GUID
 
 Base = declarative_base()
 
@@ -93,7 +94,7 @@ class DominantHorizonHint(str, Enum):
 class Session(Base):
     __tablename__ = "sessions"
 
-    session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     date = Column(Date, nullable=False)
     strategy_mode = Column(PgEnum(StrategyMode, name="strategy_mode"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -112,8 +113,8 @@ class Session(Base):
 class RawFile(Base):
     __tablename__ = "raw_files"
 
-    file_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     source = Column(PgEnum(RawSource, name="raw_source"), nullable=False)
     filename = Column(String(255), nullable=False)
     sha256 = Column(String(128), nullable=False)
@@ -132,8 +133,8 @@ class FeaturesUnderlyingDay(Base):
         UniqueConstraint("session_id", "underlying", "asof_date", "feature_version", name="uq_features_day"),
     )
 
-    feature_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    feature_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     underlying = Column(String(32), nullable=False)
     asof_date = Column(Date, nullable=False)
     feature_version = Column(String(16), nullable=False, default="v0")
@@ -180,8 +181,8 @@ class RegimeDecision(Base):
         UniqueConstraint("session_id", "underlying", "asof_date", name="uq_regime_day"),
     )
 
-    decision_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    decision_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     underlying = Column(String(32), nullable=False)
     asof_date = Column(Date, nullable=False)
     regime_label = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=False)
@@ -194,7 +195,7 @@ class RegimeDecision(Base):
     ecology_state = Column(JSON, nullable=True)
     ecology_version = Column(String(16), nullable=False, default="v0")
 
-    feature_id = Column(UUID(as_uuid=True), ForeignKey("features_underlying_day.feature_id", ondelete="CASCADE"), nullable=True)
+    feature_id = Column(GUID(), ForeignKey("features_underlying_day.feature_id", ondelete="CASCADE"), nullable=True)
 
     session = relationship("Session", back_populates="regimes")
     feature = relationship("FeaturesUnderlyingDay", back_populates="regime")
@@ -207,8 +208,8 @@ class Plan(Base):
         UniqueConstraint("session_id", "underlying", "trade_date", name="uq_plan_day"),
     )
 
-    plan_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    plan_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     underlying = Column(String(32), nullable=False)
     trade_date = Column(Date, nullable=False)
     plan_type = Column(PgEnum(PlanType, name="plan_type"), nullable=False)
@@ -217,7 +218,7 @@ class Plan(Base):
     risk_limits = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    regime_id = Column(UUID(as_uuid=True), ForeignKey("regime_decisions.decision_id", ondelete="SET NULL"), nullable=True)
+    regime_id = Column(GUID(), ForeignKey("regime_decisions.decision_id", ondelete="SET NULL"), nullable=True)
 
     session = relationship("Session", back_populates="plans")
     regime = relationship("RegimeDecision", back_populates="plan")
@@ -227,7 +228,7 @@ class OutcomeDay(Base):
     __tablename__ = "outcomes_day"
     __table_args__ = (UniqueConstraint("trade_date", "underlying", name="uq_outcome_day"),)
 
-    outcome_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    outcome_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     trade_date = Column(Date, nullable=False)
     underlying = Column(String(32), nullable=False)
     realized_label_manual = Column(PgEnum(OutcomeLabel, name="outcome_label"), nullable=True)
@@ -241,8 +242,8 @@ class OutcomeDay(Base):
 class LogMessage(Base):
     __tablename__ = "logs"
 
-    log_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    log_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     ts = Column(DateTime, default=datetime.utcnow, nullable=False)
     level = Column(PgEnum(LogLevel, name="log_level"), nullable=False, default=LogLevel.INFO)
     message = Column(Text, nullable=False)
@@ -254,8 +255,8 @@ class LogMessage(Base):
 class DailyBrief(Base):
     __tablename__ = "daily_briefs"
 
-    brief_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    brief_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     brief_type = Column(PgEnum(BriefType, name="brief_type"), nullable=False)
     underlying_universe = Column(PgEnum(UnderlyingUniverse, name="underlying_universe"), nullable=True)
@@ -272,8 +273,8 @@ class EnsembleDecision(Base):
         UniqueConstraint("session_id", "underlying", "asof_date", name="uq_ensemble_day"),
     )
 
-    ensemble_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    ensemble_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     underlying = Column(String(32), nullable=False)
     asof_date = Column(Date, nullable=False)
     ensemble_label = Column(PgEnum(RegimeLabel, name="regime_label"), nullable=False)
@@ -291,7 +292,7 @@ class ModelWeights(Base):
     __tablename__ = "model_weights"
     __table_args__ = (UniqueConstraint("asof_date", name="uq_model_weights_date"),)
 
-    weights_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    weights_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     asof_date = Column(Date, nullable=False)
     weights = Column(JSON, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -319,7 +320,7 @@ class BacktestRun(Base):
     """
     __tablename__ = "backtest_runs"
 
-    run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     run_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     strategy_version = Column(String(64), nullable=False)
     start_date = Column(Date, nullable=False)
@@ -352,8 +353,8 @@ class SimulatedTrade(Base):
         CheckConstraint("position_size > 0", name="ck_positive_position"),
     )
 
-    trade_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    backtest_run_id = Column(UUID(as_uuid=True), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
+    trade_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    backtest_run_id = Column(GUID(), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
     
     # Timing
     signal_date = Column(Date, nullable=False)  # When signal was generated (EOD)
@@ -410,8 +411,8 @@ class DailyEquityCurve(Base):
         UniqueConstraint("backtest_run_id", "date", name="uq_equity_curve_day"),
     )
 
-    curve_point_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    backtest_run_id = Column(UUID(as_uuid=True), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
+    curve_point_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    backtest_run_id = Column(GUID(), ForeignKey("backtest_runs.run_id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     
     # Portfolio state

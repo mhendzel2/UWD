@@ -111,7 +111,8 @@ def load_darkpool_data(file_path: Path) -> pd.DataFrame:
 def detect_zscore_outliers(
     df: pd.DataFrame,
     threshold: float = 3.0,
-    column: str = 'oi_diff'
+    column: str = 'oi_diff',
+    baseline_series: Optional[pd.Series] = None,
 ) -> tuple[List[OutlierResult], OutlierSummary]:
     """
     Z-Score Outlier Detection
@@ -133,8 +134,26 @@ def detect_zscore_outliers(
             threshold_info=f'Insufficient data (n={len(oi_clean)})'
         )
     
-    # Calculate z-scores
-    z_scores = np.abs(stats.zscore(oi_clean))
+    baseline_clean = None
+    if baseline_series is not None:
+        baseline_clean = pd.to_numeric(baseline_series, errors="coerce").dropna()
+
+    # Calculate z-scores (optionally using baseline mean/std)
+    if baseline_clean is not None and len(baseline_clean) >= 10:
+        mean_val = float(baseline_clean.mean())
+        std_val = float(baseline_clean.std(ddof=0))
+        if std_val == 0.0:
+            z_scores = np.zeros(len(oi_clean))
+        else:
+            z_scores = np.abs((oi_clean.astype(float) - mean_val) / std_val)
+        threshold_info = (
+            f'baseline(n={len(baseline_clean)}): mu={mean_val:.2f}, sigma={std_val:.2f}, threshold=|z|>{threshold}'
+        )
+    else:
+        z_scores = np.abs(stats.zscore(oi_clean))
+        mean_val = float(oi_clean.mean())
+        std_val = float(oi_clean.std(ddof=0))
+        threshold_info = f'mu={mean_val:.2f}, sigma={std_val:.2f}, threshold=|z|>{threshold}'
     df_with_z = df.loc[oi_clean.index].copy()
     df_with_z['z_score'] = z_scores
     
@@ -159,15 +178,12 @@ def detect_zscore_outliers(
             score=float(row['z_score'])
         ))
     
-    mean_val = oi_clean.mean()
-    std_val = oi_clean.std()
-    
     summary = OutlierSummary(
         method='Z-Score',
         count=len(outliers_df),
         top_symbol=str(outliers_df['underlying_symbol'].iloc[0]) if len(outliers_df) > 0 else 'N/A',
         max_oi_change=float(outliers_df[column].max()) if len(outliers_df) > 0 else 0.0,
-        threshold_info=f'μ={mean_val:.2f}, σ={std_val:.2f}, threshold=|z|>{threshold}'
+        threshold_info=threshold_info
     )
     
     return results, summary
@@ -176,7 +192,8 @@ def detect_zscore_outliers(
 def detect_iqr_outliers(
     df: pd.DataFrame,
     multiplier: float = 1.5,
-    column: str = 'oi_diff'
+    column: str = 'oi_diff',
+    baseline_series: Optional[pd.Series] = None,
 ) -> tuple[List[OutlierResult], OutlierSummary]:
     """
     IQR (Interquartile Range) Outlier Detection
@@ -197,9 +214,15 @@ def detect_iqr_outliers(
             threshold_info=f'Insufficient data (n={len(oi_clean)})'
         )
     
-    # Calculate IQR bounds
-    Q1 = oi_clean.quantile(0.25)
-    Q3 = oi_clean.quantile(0.75)
+    baseline_clean = None
+    if baseline_series is not None:
+        baseline_clean = pd.to_numeric(baseline_series, errors="coerce").dropna()
+
+    # Calculate IQR bounds (optionally using baseline quantiles)
+    series_for_bounds = baseline_clean if baseline_clean is not None and len(baseline_clean) >= 10 else oi_clean
+
+    Q1 = series_for_bounds.quantile(0.25)
+    Q3 = series_for_bounds.quantile(0.75)
     IQR = Q3 - Q1
     lower_bound = Q1 - multiplier * IQR
     upper_bound = Q3 + multiplier * IQR
@@ -242,7 +265,14 @@ def detect_iqr_outliers(
         count=len(outliers_df),
         top_symbol=str(outliers_df['underlying_symbol'].iloc[0]) if len(outliers_df) > 0 else 'N/A',
         max_oi_change=float(outliers_df[column].max()) if len(outliers_df) > 0 else 0.0,
-        threshold_info=f'Q1={Q1:.4f}, Q3={Q3:.4f}, IQR={IQR:.4f}, bounds=[{lower_bound:.4f}, {upper_bound:.4f}]'
+        threshold_info=(
+            (
+                f'baseline(n={len(baseline_clean)}): '
+                if baseline_clean is not None and len(baseline_clean) >= 10
+                else ''
+            )
+            + f'Q1={Q1:.4f}, Q3={Q3:.4f}, IQR={IQR:.4f}, bounds=[{lower_bound:.4f}, {upper_bound:.4f}]'
+        )
     )
     
     return results, summary
@@ -391,13 +421,26 @@ def run_all_detection_methods(
     zscore_threshold: float = 3.0,
     iqr_multiplier: float = 1.5,
     earnings_days: int = 14,
-    chain_pct: float = 0.20
+    chain_pct: float = 0.20,
+    baseline_df: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Run all outlier detection methods and return combined results"""
     
     # Run each method
-    zscore_results, zscore_summary = detect_zscore_outliers(df, threshold=zscore_threshold)
-    iqr_results, iqr_summary = detect_iqr_outliers(df, multiplier=iqr_multiplier)
+    baseline_series = None
+    if baseline_df is not None and 'oi_diff' in baseline_df.columns:
+        baseline_series = baseline_df['oi_diff']
+
+    zscore_results, zscore_summary = detect_zscore_outliers(
+        df,
+        threshold=zscore_threshold,
+        baseline_series=baseline_series,
+    )
+    iqr_results, iqr_summary = detect_iqr_outliers(
+        df,
+        multiplier=iqr_multiplier,
+        baseline_series=baseline_series,
+    )
     preevent_results, preevent_summary = detect_preevent_manipulation(
         df, 
         earnings_threshold_days=earnings_days,
@@ -436,49 +479,64 @@ def analyze_from_session_data(
     zscore_threshold: float = 3.0,
     iqr_multiplier: float = 1.5,
     earnings_days: int = 14,
-    chain_pct: float = 0.20
+    chain_pct: float = 0.20,
+    baseline_oi_data: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Analyze outliers from session data (already loaded in DB)"""
     
     if not oi_data:
         return {'error': 'No OI data provided'}
     
+    def _normalize_df(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+        df_local = pd.DataFrame(rows)
+
+        # Normalize column names from DB format
+        column_mapping = {
+            # Ingest CSV headers (snake_case)
+            'oi_diff_plain': 'oi_diff',
+
+            # Legacy DB row format (lowercase / no underscores)
+            'oidiff': 'oi_diff',
+            'underlyingsymbol': 'underlying_symbol',
+            'plainoptionsymbol': 'option_symbol',
+            'stockprice': 'stock_price',
+            'percentageoftotal': 'percentage_of_total',
+            'nextearningsdate': 'next_earnings_date',
+            'currdate': 'curr_date',
+        }
+
+        for old_name, new_name in column_mapping.items():
+            if old_name in df_local.columns:
+                df_local = df_local.rename(columns={old_name: new_name})
+
+        # Parse numeric columns
+        numeric_cols = ['oi_diff', 'stock_price', 'percentage_of_total', 'dte', 'strike']
+        for col in numeric_cols:
+            if col in df_local.columns:
+                df_local[col] = pd.to_numeric(df_local[col], errors='coerce')
+
+        # Parse dates and calculate days to earnings
+        if 'curr_date' in df_local.columns:
+            df_local['curr_date'] = pd.to_datetime(df_local['curr_date'], errors='coerce')
+        if 'next_earnings_date' in df_local.columns:
+            df_local['next_earnings_date'] = pd.to_datetime(df_local['next_earnings_date'], errors='coerce')
+            if 'curr_date' in df_local.columns:
+                df_local['days_to_earnings'] = (df_local['next_earnings_date'] - df_local['curr_date']).dt.days
+
+        return df_local
+
     # Convert to DataFrame
-    df = pd.DataFrame(oi_data)
-    
-    # Normalize column names from DB format
-    column_mapping = {
-        'oidiff': 'oi_diff',
-        'underlyingsymbol': 'underlying_symbol',
-        'plainoptionsymbol': 'option_symbol',
-        'stockprice': 'stock_price',
-        'percentageoftotal': 'percentage_of_total',
-        'nextearningsdate': 'next_earnings_date',
-        'currdate': 'curr_date',
-    }
-    
-    for old_name, new_name in column_mapping.items():
-        if old_name in df.columns:
-            df = df.rename(columns={old_name: new_name})
-    
-    # Parse numeric columns
-    numeric_cols = ['oi_diff', 'stock_price', 'percentage_of_total', 'dte', 'strike']
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Parse dates and calculate days to earnings
-    if 'curr_date' in df.columns:
-        df['curr_date'] = pd.to_datetime(df['curr_date'], errors='coerce')
-    if 'next_earnings_date' in df.columns:
-        df['next_earnings_date'] = pd.to_datetime(df['next_earnings_date'], errors='coerce')
-        if 'curr_date' in df.columns:
-            df['days_to_earnings'] = (df['next_earnings_date'] - df['curr_date']).dt.days
+    df = _normalize_df(oi_data)
+
+    baseline_df = None
+    if baseline_oi_data:
+        baseline_df = _normalize_df(baseline_oi_data)
     
     return run_all_detection_methods(
         df,
         zscore_threshold=zscore_threshold,
         iqr_multiplier=iqr_multiplier,
         earnings_days=earnings_days,
-        chain_pct=chain_pct
+        chain_pct=chain_pct,
+        baseline_df=baseline_df,
     )
