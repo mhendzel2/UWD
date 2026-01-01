@@ -1,0 +1,124 @@
+.outlierPanel {
+  border: 1px solid #eee;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.outlierHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outlierTitle {
+  margin: 0;
+}
+
+.smallMuted {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.grid2 {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.grid4 {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.gridLabel {
+  display: grid;
+  gap: 4px;
+}
+
+.methodBox {
+  display: grid;
+  gap: 6px;
+}
+
+.methodButtons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.error {
+  font-weight: 600;
+}
+
+.summaryGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.card {
+  border: 1px solid #eee;
+  padding: 10px;
+}
+
+.cardTitle {
+  font-weight: 600;
+}
+
+.summaryFooter {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.thresholdCard {
+  border: 1px solid #eee;
+  padding: 10px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.thLeft {
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  padding: 6px;
+}
+
+.thRight {
+  text-align: right;
+  border-bottom: 1px solid #eee;
+  padding: 6px;
+}
+
+.td {
+  padding: 6px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.tdRight {
+  padding: 6px;
+  border-bottom: 1px solid #f3f3f3;
+  text-align: right;
+}
+
+.noResults {
+  opacity: 0.85;
+}

@@ -1,0 +1,12 @@
+.appRoot {
+  font-family: Arial, sans-serif;
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.sessionControls {
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+}

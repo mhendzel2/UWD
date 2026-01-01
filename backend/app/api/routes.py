@@ -609,3 +609,164 @@ def get_backtest_equity(
         }
         for c in curve
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTLIER DETECTION ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.analysis.outlier_detection import (
+    analyze_from_session_data,
+    detect_zscore_outliers,
+    detect_iqr_outliers,
+    detect_preevent_manipulation,
+    get_distribution_stats,
+    load_oi_data,
+)
+from pydantic import BaseModel
+from typing import Optional
+
+
+class OutlierDetectionParams(BaseModel):
+    zscore_threshold: float = 3.0
+    iqr_multiplier: float = 1.5
+    earnings_days: int = 14
+    chain_pct: float = 0.20
+
+
+@router.post("/analysis/outliers/detect")
+def detect_outliers_from_session(
+    session_id: str = Form(...),
+    zscore_threshold: float = Form(3.0),
+    iqr_multiplier: float = Form(1.5),
+    earnings_days: int = Form(14),
+    chain_pct: float = Form(0.20),
+    db: Session = Depends(get_db),
+):
+    """
+    Run all outlier detection methods on OI data from a session.
+    
+    Methods:
+    1. Z-Score: Flags OI changes >3σ from mean (99.7% confidence)
+    2. IQR: Robust to skewed distributions, flags 1.5×IQR extremes  
+    3. Pre-Event: OI spike + low volume + earnings proximity signals
+    """
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get OI data from session's raw files
+    files = db.query(models.RawFile).filter(
+        models.RawFile.session_id == session_id,
+        models.RawFile.source == models.RawSource.OI_DIFF
+    ).all()
+    
+    if not files:
+        raise HTTPException(status_code=404, detail="No OI data found for session")
+    
+    # Aggregate all OI rows
+    all_rows = []
+    for rf in files:
+        if rf.extras and "rows" in rf.extras:
+            all_rows.extend(rf.extras["rows"])
+    
+    if not all_rows:
+        raise HTTPException(status_code=404, detail="No OI rows found in session data")
+    
+    # Run analysis
+    results = analyze_from_session_data(
+        all_rows,
+        zscore_threshold=zscore_threshold,
+        iqr_multiplier=iqr_multiplier,
+        earnings_days=earnings_days,
+        chain_pct=chain_pct
+    )
+    
+    return results
+
+
+@router.get("/analysis/outliers/available-dates")
+def get_available_dates_for_outliers(db: Session = Depends(get_db)):
+    """Get list of dates that have OI data available for outlier analysis."""
+    sessions = db.query(models.Session).order_by(models.Session.date.desc()).all()
+    
+    available = []
+    for session in sessions:
+        oi_files = db.query(models.RawFile).filter(
+            models.RawFile.session_id == session.session_id,
+            models.RawFile.source == models.RawSource.OI_DIFF
+        ).count()
+        
+        if oi_files > 0:
+            available.append({
+                "session_id": str(session.session_id),
+                "date": str(session.date),
+                "oi_file_count": oi_files
+            })
+    
+    return {"available_dates": available}
+
+
+@router.post("/analysis/outliers/upload-analyze")
+def upload_and_analyze_outliers(
+    file: UploadFile = File(...),
+    zscore_threshold: float = Form(3.0),
+    iqr_multiplier: float = Form(1.5),
+    earnings_days: int = Form(14),
+    chain_pct: float = Form(0.20),
+):
+    """
+    Upload a CSV file and run outlier detection directly (without session).
+    
+    Accepts chain-oi-changes format CSV files.
+    """
+    import tempfile
+    from pathlib import Path
+    import pandas as pd
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp:
+        content = file.file.read()
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+    
+    try:
+        df = load_oi_data(tmp_path)
+        
+        from app.analysis.outlier_detection import run_all_detection_methods
+        results = run_all_detection_methods(
+            df,
+            zscore_threshold=zscore_threshold,
+            iqr_multiplier=iqr_multiplier,
+            earnings_days=earnings_days,
+            chain_pct=chain_pct
+        )
+        
+        return results
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+@router.get("/analysis/outliers/symbols/{session_id}")
+def get_outlier_symbols_detail(
+    session_id: str,
+    symbol: str,
+    db: Session = Depends(get_db),
+):
+    """Get detailed OI data for a specific symbol from session."""
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    files = db.query(models.RawFile).filter(
+        models.RawFile.session_id == session_id,
+        models.RawFile.source == models.RawSource.OI_DIFF
+    ).all()
+    
+    symbol_rows = []
+    for rf in files:
+        if rf.extras and "rows" in rf.extras:
+            for row in rf.extras["rows"]:
+                if row.get("underlyingsymbol", "").strip().upper() == symbol.upper():
+                    symbol_rows.append(row)
+    
+    return {"symbol": symbol, "rows": symbol_rows, "count": len(symbol_rows)}

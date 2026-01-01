@@ -7,6 +7,8 @@ import DailyBriefsPanel from "./components/DailyBriefsPanel";
 import EcologyPanel from "./components/EcologyPanel";
 import EnsemblePanel from "./components/EnsemblePanel";
 import ChartsPanel from "./components/ChartsPanel";
+import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
+import "./App.css";
 
 const API_BASE = "http://localhost:8000";
 
@@ -200,13 +202,13 @@ function App() {
   };
 
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", padding: 24, display: "grid", gap: 16 }}>
+    <div className="appRoot">
       <header>
         <h1>Regime-First EOD v1</h1>
         <p>Discovery briefs, ecology interpretability, and v1 ensemble layered on v0 compatibility.</p>
       </header>
 
-      <section style={{ display: "grid", gap: 8, maxWidth: 640 }}>
+      <section className="sessionControls">
         <label>
           Session Date (YYYY-MM-DD)
           <input value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} placeholder="2024-01-05" />
@@ -241,6 +243,13 @@ function App() {
       />
 
       <ChartsPanel regimes={regimes} />
+
+      <OutlierDetectionPanel
+        apiBase={API_BASE}
+        sessionId={sessionId}
+        sessionDate={sessionDate}
+        onLog={(msg) => setLogs((prev) => [msg, ...prev])}
+      />
 
       <DailyBriefsPanel briefs={briefs} regimeMap={regimeMap} />
       <EcologyPanel entries={ecologyEntries} />
