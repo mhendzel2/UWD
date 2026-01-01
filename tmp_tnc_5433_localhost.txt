@@ -1,0 +1,13 @@
+﻿
+
+ComputerName           : localhost
+RemoteAddress          : ::1
+RemotePort             : 5433
+InterfaceAlias         : Loopback Pseudo-Interface 1
+SourceAddress          : ::1
+PingSucceeded          : True
+PingReplyDetails (RTT) : 0 ms
+TcpTestSucceeded       : False
+
+
+
