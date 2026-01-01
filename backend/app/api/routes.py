@@ -56,6 +56,35 @@ def create_session(
     return {"session_id": str(session.session_id), "date": session.date}
 
 
+@router.get("/sessions/latest")
+def get_latest_session(db: Session = Depends(get_db)):
+    session = db.query(models.Session).order_by(models.Session.date.desc()).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="No sessions found")
+    return {"session_id": str(session.session_id), "date": session.date, "strategy_mode": session.strategy_mode}
+
+
+@router.post("/sessions/ensure")
+def ensure_session(
+    session_date: str = Form(...),
+    strategy_mode: models.StrategyMode = Form(models.StrategyMode.INDEX_EOD),
+    db: Session = Depends(get_db),
+):
+    try:
+        parsed_date = parse_date(session_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    session = db.query(models.Session).filter(models.Session.date == parsed_date).first()
+    if not session:
+        session = models.Session(date=parsed_date, strategy_mode=strategy_mode)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+    
+    return {"session_id": str(session.session_id), "date": session.date}
+
+
 def _dispatch_parser(source: models.RawSource, path: Path) -> ParsedCSV:
     if source == models.RawSource.OI_DIFF:
         return oi_diff.parse_oi_diff(path)

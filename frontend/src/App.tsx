@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import UploadDataset from "./components/UploadDataset";
 import SessionDashboard from "./components/SessionDashboard";
 import ManualOutcomeLabel from "./components/ManualOutcomeLabel";
@@ -6,6 +6,7 @@ import LogsPanel from "./components/LogsPanel";
 import DailyBriefsPanel from "./components/DailyBriefsPanel";
 import EcologyPanel from "./components/EcologyPanel";
 import EnsemblePanel from "./components/EnsemblePanel";
+import ChartsPanel from "./components/ChartsPanel";
 
 const API_BASE = "http://localhost:8000";
 
@@ -23,6 +24,33 @@ function App() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [ensembles, setEnsembles] = useState<Ensemble[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+
+  const loadLatestSession = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/latest`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionId(data.session_id);
+        setSessionDate(data.date);
+        setStrategyMode(data.strategy_mode);
+        setLogs((prev) => [`Loaded latest session ${data.date}`, ...prev]);
+      }
+    } catch (e) {
+      console.error("Failed to load latest session", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLatestSession();
+  }, [loadLatestSession]);
+
+  useEffect(() => {
+    if (sessionId) {
+      loadRegimes();
+      loadBriefs();
+      loadEnsembles();
+    }
+  }, [sessionId]);
 
   const createSession = useCallback(async () => {
     const form = new FormData();
@@ -165,6 +193,12 @@ function App() {
     return map;
   }, [regimes]);
 
+  const handleSessionCreated = (id: string, date: string) => {
+    setSessionId(id);
+    setSessionDate(date);
+    setLogs((prev) => [`Switched to session ${date}`, ...prev]);
+  };
+
   return (
     <div style={{ fontFamily: "Arial, sans-serif", padding: 24, display: "grid", gap: 16 }}>
       <header>
@@ -190,7 +224,12 @@ function App() {
         {sessionId && <div>Session ID: {sessionId}</div>}
       </section>
 
-      <UploadDataset apiBase={API_BASE} sessionId={sessionId} onUploaded={(msg) => setLogs((prev) => [msg, ...prev])} />
+      <UploadDataset 
+        apiBase={API_BASE} 
+        sessionId={sessionId} 
+        onSessionCreated={handleSessionCreated}
+        onUploaded={(msg) => setLogs((prev) => [msg, ...prev])} 
+      />
 
       <SessionDashboard
         sessionId={sessionId}
@@ -200,6 +239,8 @@ function App() {
         onComputeV1={computeV1}
         decisionTable={decisionTable}
       />
+
+      <ChartsPanel regimes={regimes} />
 
       <DailyBriefsPanel briefs={briefs} regimeMap={regimeMap} />
       <EcologyPanel entries={ecologyEntries} />
