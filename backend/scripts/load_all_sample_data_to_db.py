@@ -37,8 +37,11 @@ _FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|dp-eod-report|hot-chains|st
 
 def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, path: Path) -> bool:
     checksum = sha256_file(path)
-    existing = (
-        db.query(models.RawFile)
+    # IMPORTANT: don't select the full RawFile row here.
+    # RawFile includes a large JSONB payload (extras). Selecting it forces psycopg2
+    # to decode JSON just to determine existence, which is very slow.
+    existing_id = (
+        db.query(models.RawFile.id)
         .filter(
             models.RawFile.session_id == session_id,
             models.RawFile.source == source,
@@ -46,7 +49,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
         )
         .first()
     )
-    if existing:
+    if existing_id:
         return False
 
     parsed = routes._dispatch_parser(source, path)
