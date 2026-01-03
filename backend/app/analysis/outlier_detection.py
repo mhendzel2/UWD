@@ -9,7 +9,6 @@ Implements three complementary outlier detection methods:
 
 import pandas as pd
 import numpy as np
-from scipy import stats
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -150,7 +149,13 @@ def detect_zscore_outliers(
             f'baseline(n={len(baseline_clean)}): mu={mean_val:.2f}, sigma={std_val:.2f}, threshold=|z|>{threshold}'
         )
     else:
-        z_scores = np.abs(stats.zscore(oi_clean))
+        # Avoid SciPy dependency: z = (x - mu) / sigma
+        mean_val = float(oi_clean.mean())
+        std_val = float(oi_clean.std(ddof=0))
+        if std_val == 0.0:
+            z_scores = np.zeros(len(oi_clean))
+        else:
+            z_scores = np.abs((oi_clean.astype(float) - mean_val) / std_val)
         mean_val = float(oi_clean.mean())
         std_val = float(oi_clean.std(ddof=0))
         threshold_info = f'mu={mean_val:.2f}, sigma={std_val:.2f}, threshold=|z|>{threshold}'

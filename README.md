@@ -8,7 +8,7 @@ This repository provides a PostgreSQL-backed, regime-first EOD analysis stack. I
 - Docker (for PostgreSQL)
 
 ## Quickstart
-1. `docker-compose up -d` to start PostgreSQL 16 (port 5432, user `uw_app`, password `uw_password`, db `uw_eod`).
+1. `docker-compose up -d` to start PostgreSQL 16 (port 5433, user `uw_app`, password `uw_password`, db `uw_eod`).
 2. Backend:
    - `cd backend`
    - `python -m venv .venv && . .venv/Scripts/activate` (PowerShell: `.\.venv\Scripts\activate`)

@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 
 
 def main() -> None:
-    # Point backend at the Docker Postgres published on host port 5433.
+    # Point backend at the local Postgres instance (default port 5432).
     os.environ.setdefault(
         "UW_DATABASE_URL",
-        "postgresql+psycopg2://uw_app:uw_password@127.0.0.1:5433/uw_eod",
+        "postgresql+psycopg2://uw_app:uw_password@127.0.0.1:5432/uw_eod",
     )
 
     from app.main import app  # imported after env var so Settings picks it up

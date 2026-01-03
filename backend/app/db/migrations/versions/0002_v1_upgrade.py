@@ -17,8 +17,7 @@ def upgrade() -> None:
     dominant_horizon_hint = sa.Enum("SHORT", "MEDIUM", "LONG", "MIXED", name="dominant_horizon_hint")
     regime_label = sa.Enum("PIN_RANGE", "TREND_RISK", "MIXED_NO_TRADE", name="regime_label", create_type=False)
 
-    brief_type.create(op.get_bind(), checkfirst=True)
-    underlying_universe.create(op.get_bind(), checkfirst=True)
+    # This enum is needed for an ALTER TABLE below; ensure the type exists first.
     dominant_horizon_hint.create(op.get_bind(), checkfirst=True)
 
     op.drop_constraint("uq_features_day", "features_underlying_day", type_="unique")

@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, date
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Iterable
 
 import tempfile
@@ -242,7 +243,18 @@ def main() -> None:
     if os.environ.get("UW_IMPORT_MAX_OI_ROWS"):
         max_oi_rows = int(os.environ["UW_IMPORT_MAX_OI_ROWS"])
 
-    print("Database URL:", os.environ.get("UW_DATABASE_URL", "<default from settings>"))
+    db_url = os.environ.get("UW_DATABASE_URL", "<default from settings>")
+    try:
+        parsed = urlparse(db_url)
+        if parsed.scheme.startswith("postgres") and (parsed.username or parsed.password):
+            user = parsed.username or ""
+            host = parsed.hostname or ""
+            port = f":{parsed.port}" if parsed.port else ""
+            auth = f"{user}:***" if user else "***"
+            db_url = parsed._replace(netloc=f"{auth}@{host}{port}").geturl()
+    except Exception:
+        pass
+    print("Database URL:", db_url)
     if date_start or date_end or max_oi_rows:
         print(
             f"Import filters: date_start={date_start} date_end={date_end} max_oi_rows={max_oi_rows}",
