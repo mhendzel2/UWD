@@ -41,7 +41,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
     # RawFile includes a large JSONB payload (extras). Selecting it forces psycopg2
     # to decode JSON just to determine existence, which is very slow.
     existing_id = (
-        db.query(models.RawFile.id)
+        db.query(models.RawFile.file_id)
         .filter(
             models.RawFile.session_id == session_id,
             models.RawFile.source == source,
