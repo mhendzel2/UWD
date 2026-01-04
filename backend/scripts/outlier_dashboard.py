@@ -31,6 +31,7 @@ from typing import Iterable
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -1186,14 +1187,54 @@ def main() -> None:
                     .reset_index()
                 )
                 agg = agg.rename(columns={"<lambda_0>": "p25", "<lambda_1>": "p75"})
-                fig = px.line(agg, x="days_post", y="median", markers=True)
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=agg["days_post"],
+                        y=agg["p75"],
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip",
+                        name="p75",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=agg["days_post"],
+                        y=agg["p25"],
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor="rgba(100, 149, 237, 0.18)",
+                        showlegend=True,
+                        name="p25–p75",
+                        hoverinfo="skip",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=agg["days_post"],
+                        y=agg["median"],
+                        mode="lines+markers",
+                        line=dict(width=2),
+                        name="median",
+                        customdata=agg[["count"]],
+                        hovertemplate="days=%{x}<br>median=%{y:.2f}<br>n=%{customdata[0]}<extra></extra>",
+                    )
+                )
                 fig.update_layout(
                     xaxis_title="Trading days post acquisition",
                     yaxis_title=("Return %" if ycol == "ret_%" else "P/L $ per contract"),
                     margin=dict(l=0, r=0, t=10, b=0),
+                    legend_orientation="h",
+                    legend_yanchor="bottom",
+                    legend_y=1.02,
+                    legend_xanchor="left",
+                    legend_x=0,
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                st.caption("Aggregate across all daily top 5 picks: median with sample counts.")
+                st.caption("Aggregate across all daily top 5 picks: median with p25–p75 band.")
 
         st.subheader("Top movers")
         if ret_col in f.columns and f[ret_col].notna().any():
