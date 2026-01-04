@@ -43,7 +43,7 @@ def _repo_root() -> Path:
     return _repo_backend_root().parents[0]
 
 
-_FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
+_FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|bot-eod-report|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
 _OCC_RE = re.compile(r"^(?P<underlying>[A-Z]+)(?P<yymmdd>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
 
 
@@ -171,6 +171,7 @@ def _import_uploaded_csvs_to_db(*, files: Iterable[st.runtime.uploaded_file_mana
     # Map filename prefixes to RawSource
     prefix_to_source: dict[str, models.RawSource] = {
         "chain-oi-changes": models.RawSource.OI_DIFF,
+        "bot-eod-report": models.RawSource.BOT_EOD,
         "dp-eod-report": models.RawSource.DARKPOOL_EOD,
         "hot-chains": models.RawSource.HOT_CHAINS,
         "stock-screener": models.RawSource.STOCK_SCREENER,

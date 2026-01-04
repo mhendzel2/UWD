@@ -14,7 +14,7 @@ from app.db import models
 from app.ecology.compute_v0 import compute_ecology_state
 from app.features.build_v0 import build_feature_row
 from app.features.build_v1 import build_feature_row_v1
-from app.ingest import oi_diff, bot_eod, hot_chains, darkpool_eod, stock_screener_eod
+from app.ingest import oi_diff, bot_eod, hot_chains, darkpool_eod, stock_screener_eod, options_flow
 from app.ingest.types import ParsedCSV
 from app.regime.classify_v1_ensemble import classify_ensemble
 from app.regime.classify_v0 import classify
@@ -22,6 +22,7 @@ from app.plans.build_plan_v0 import build_plan
 from app.stability.report_v1 import build_stability_snapshot
 from app.utils.hashing import sha256_file
 from app.utils.time import parse_date
+from app.ingest.local_files import import_local_options_flow_file
 from app.backtest.config import BacktestConfig
 from app.backtest.engine import OptionsBacktester
 from app.backtest.data_provider import MockDataProvider
@@ -91,6 +92,8 @@ def _dispatch_parser(source: models.RawSource, path: Path) -> ParsedCSV:
         return oi_diff.parse_oi_diff(path)
     if source == models.RawSource.BOT_EOD:
         return bot_eod.parse_bot_eod(path)
+    if source == models.RawSource.OPTIONS_FLOW:
+        return options_flow.parse_options_flow(path)
     if source == models.RawSource.HOT_CHAINS:
         return hot_chains.parse_hot_chains(path)
     if source == models.RawSource.DARKPOOL_EOD:
@@ -136,11 +139,59 @@ def import_csv(
     return {"file_id": str(raw_file.file_id), "rows": raw_file.rows}
 
 
+@router.post("/import_local/options_flow")
+def import_local_options_flow(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    filename = str(payload.get("filename") or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    try:
+        result = import_local_options_flow_file(db=db, filename=filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"sessions_touched": result.sessions_touched, "rows_imported": result.rows_imported}
+
+
 def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, Dict[str, float]]]:
     per_underlying: Dict[str, Dict[str, Dict[str, float]]] = {}
     files = db.query(models.RawFile).filter(models.RawFile.session_id == session_id).all()
     for rf in files:
-        if not rf.extras or "rows" not in rf.extras:
+        if not rf.extras:
+            continue
+        # Large-file imports may store precomputed aggregates to avoid huge JSON payloads.
+        if isinstance(rf.extras, dict) and "agg" in rf.extras and isinstance(rf.extras.get("agg"), dict):
+            agg = rf.extras["agg"]
+            key = ""
+            if rf.source == models.RawSource.OI_DIFF:
+                key = "oi"
+            elif rf.source in (models.RawSource.BOT_EOD, models.RawSource.OPTIONS_FLOW):
+                key = "bot"
+            elif rf.source == models.RawSource.HOT_CHAINS:
+                key = "hot_chains"
+            elif rf.source == models.RawSource.DARKPOOL_EOD:
+                key = "darkpool"
+            elif rf.source == models.RawSource.STOCK_SCREENER:
+                key = "stock_screener"
+            else:
+                continue
+
+            for underlying, metrics in agg.items():
+                per_underlying.setdefault(underlying, {})
+                if key in per_underlying[underlying] and isinstance(per_underlying[underlying][key], dict):
+                    existing = per_underlying[underlying][key]
+                    merged = dict(existing)
+                    for mk, mv in metrics.items():
+                        try:
+                            merged[mk] = float(merged.get(mk, 0) or 0) + float(mv or 0)
+                        except (ValueError, TypeError):
+                            merged[mk] = mv
+                    per_underlying[underlying][key] = merged
+                else:
+                    per_underlying[underlying][key] = metrics
+            continue
+
+        if "rows" not in rf.extras:
             continue
         rows = rf.extras["rows"]
         agg_fn = None
@@ -150,6 +201,10 @@ def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, 
             key = "oi"
         elif rf.source == models.RawSource.BOT_EOD:
             agg_fn = bot_eod.aggregate
+            key = "bot"
+        elif rf.source == models.RawSource.OPTIONS_FLOW:
+            agg_fn = options_flow.aggregate
+            # Map into the existing 'bot' aggregate bucket so features don't need to change.
             key = "bot"
         elif rf.source == models.RawSource.HOT_CHAINS:
             agg_fn = hot_chains.aggregate
@@ -166,7 +221,19 @@ def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, 
         agg = agg_fn(rows)
         for underlying, metrics in agg.items():
             per_underlying.setdefault(underlying, {})
-            per_underlying[underlying][key] = metrics
+            # If multiple sources map into the same logical bucket (e.g. BOT_EOD + OPTIONS_FLOW),
+            # merge numeric metrics instead of overwriting.
+            if key in per_underlying[underlying] and isinstance(per_underlying[underlying][key], dict):
+                existing = per_underlying[underlying][key]
+                merged = dict(existing)
+                for mk, mv in metrics.items():
+                    try:
+                        merged[mk] = float(merged.get(mk, 0) or 0) + float(mv or 0)
+                    except (ValueError, TypeError):
+                        merged[mk] = mv
+                per_underlying[underlying][key] = merged
+            else:
+                per_underlying[underlying][key] = metrics
     return per_underlying
 
 

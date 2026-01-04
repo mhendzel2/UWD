@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.features.build_v0 import compute_from_aggregates
+from app.ingest import bot_eod
 from app.utils.underlying import derive_underlying
 
 PERSISTENCE_WINDOW = 3
@@ -119,6 +120,60 @@ def _intent_bucket_from_bot(rows: List[Dict[str, Any]], underlying: str) -> str 
     return "BALANCED"
 
 
+def _intent_bucket_from_bot_metrics(metrics: Dict[str, Any] | None) -> str | None:
+    if not metrics:
+        return None
+    try:
+        ask = float(metrics.get("ask_count", 0) or 0)
+        bid = float(metrics.get("bid_count", 0) or 0)
+    except (ValueError, TypeError):
+        return None
+    if ask == bid == 0:
+        return None
+    if ask > bid * 1.2:
+        return "ASK_DOM"
+    if bid > ask * 1.2:
+        return "BID_DOM"
+    return "BALANCED"
+
+
+def _bot_metrics_for_session(db: Session, session_id: str) -> Dict[str, Dict[str, Any]]:
+    """Return per-underlying bot/flow metrics for a session.
+
+    Prefer pre-aggregated metrics stored in RawFile.extras['agg'].
+    Fall back to aggregating from stored rows if present.
+    """
+
+    for source in (models.RawSource.OPTIONS_FLOW, models.RawSource.BOT_EOD):
+        rf = (
+            db.query(models.RawFile)
+            .filter(models.RawFile.session_id == session_id, models.RawFile.source == source)
+            .order_by(models.RawFile.imported_at.desc())
+            .first()
+        )
+        if not rf or not rf.extras:
+            continue
+
+        if isinstance(rf.extras, dict) and isinstance(rf.extras.get("agg"), dict):
+            return rf.extras["agg"]
+
+        rows = rf.extras.get("rows") if isinstance(rf.extras, dict) else None
+        if isinstance(rows, list) and rows:
+            return bot_eod.aggregate(rows)
+
+    return {}
+
+
+def _collect_bot_metrics(db: Session, asof_date: date, limit: int) -> List[Tuple[date, Dict[str, Dict[str, Any]]]]:
+    sessions = _recent_sessions(db, asof_date, limit)
+    collected: list[Tuple[date, Dict[str, Dict[str, Any]]]] = []
+    for sess in sessions:
+        metrics = _bot_metrics_for_session(db, str(sess.session_id))
+        if metrics:
+            collected.append((sess.date, metrics))
+    return list(reversed(collected))
+
+
 def _intent_persistence(buckets: List[str]) -> float | None:
     if not buckets:
         return None
@@ -215,7 +270,7 @@ def build_feature_row_v1(
 
     oi_history = _collect_rows(db, asof_date, models.RawSource.OI_DIFF, PERSISTENCE_WINDOW)
     hot_history = _collect_rows(db, asof_date, models.RawSource.HOT_CHAINS, PERSISTENCE_WINDOW)
-    bot_history = _collect_rows(db, asof_date, models.RawSource.BOT_EOD, PERSISTENCE_WINDOW)
+    bot_metrics_history = _collect_bot_metrics(db, asof_date, PERSISTENCE_WINDOW)
     stock_history = [row for _, rows in _collect_rows(db, asof_date, models.RawSource.STOCK_SCREENER, RANGE_WINDOW) for row in rows]
 
     oi_sets = [_top_symbols_from_oi(rows, underlying) for _, rows in oi_history]
@@ -227,8 +282,8 @@ def build_feature_row_v1(
         if bucket:
             intent_buckets.append(bucket)
     if not intent_buckets:
-        for _, rows in bot_history:
-            bucket = _intent_bucket_from_bot(rows, underlying)
+        for _, metrics_by_under in bot_metrics_history:
+            bucket = _intent_bucket_from_bot_metrics(metrics_by_under.get(underlying.upper()) or metrics_by_under.get(underlying))
             if bucket:
                 intent_buckets.append(bucket)
 

@@ -14,29 +14,49 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from app.api import routes
 from app.db import models
 from app.db.engine import session_scope
+from app.ingest import bot_eod
 from app.utils.hashing import sha256_file
 from app.utils.time import parse_date
 
 
+def _extract_date_anywhere(name: str) -> date | None:
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", name)
+    if not m:
+        return None
+    try:
+        return parse_date(m.group(1))
+    except Exception:
+        return None
+
+
 _PREFIX_TO_SOURCE: dict[str, models.RawSource] = {
     "chain-oi-changes": models.RawSource.OI_DIFF,
+    "bot-eod-report": models.RawSource.BOT_EOD,
     "dp-eod-report": models.RawSource.DARKPOOL_EOD,
     "hot-chains": models.RawSource.HOT_CHAINS,
     "stock-screener": models.RawSource.STOCK_SCREENER,
 }
 
-_FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
+_FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|bot-eod-report|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
 
 
 def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, path: Path) -> bool:
-    checksum = sha256_file(path)
+    # BOT_EOD files can be extremely large; avoid full-file hashing where possible.
+    file_size = int(path.stat().st_size)
+    if source == models.RawSource.BOT_EOD and file_size > 50 * 1024 * 1024:
+        fingerprint = f"{path.name}:{file_size}:{int(path.stat().st_mtime_ns)}"
+        checksum = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+    else:
+        checksum = sha256_file(path)
     # IMPORTANT: don't select the full RawFile row here.
     # RawFile includes a large JSONB payload (extras). Selecting it forces psycopg2
     # to decode JSON just to determine existence, which is very slow.
@@ -52,17 +72,30 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
     if existing_id:
         return False
 
-    parsed = routes._dispatch_parser(source, path)
-    raw_file = models.RawFile(
-        session_id=session_id,
-        source=source,
-        filename=path.name,
-        sha256=checksum,
-        rows=len(parsed.rows),
-        extras={"headers": parsed.headers, "rows": parsed.rows},
-        parse_status=models.ParseStatus.OK if not parsed.errors else models.ParseStatus.ERROR,
-        error_message=";".join(parsed.errors) if parsed.errors else None,
-    )
+    # BOT_EOD large-file import: store only per-underlying aggregates (no full row payload).
+    if source == models.RawSource.BOT_EOD and file_size > 50 * 1024 * 1024:
+        headers, agg, row_count = bot_eod.aggregate_csv(path)
+        raw_file = models.RawFile(
+            session_id=session_id,
+            source=source,
+            filename=path.name,
+            sha256=checksum,
+            rows=row_count,
+            extras={"headers": headers, "agg": agg},
+            parse_status=models.ParseStatus.OK,
+        )
+    else:
+        parsed = routes._dispatch_parser(source, path)
+        raw_file = models.RawFile(
+            session_id=session_id,
+            source=source,
+            filename=path.name,
+            sha256=checksum,
+            rows=len(parsed.rows),
+            extras={"headers": parsed.headers, "rows": parsed.rows},
+            parse_status=models.ParseStatus.OK if not parsed.errors else models.ParseStatus.ERROR,
+            error_message=";".join(parsed.errors) if parsed.errors else None,
+        )
     db.add(raw_file)
     db.add(
         models.LogMessage(
@@ -87,7 +120,7 @@ def main() -> int:
     parser.add_argument(
         "--sources",
         default="ALL",
-        help="Comma-separated sources: OI_DIFF,HOT_CHAINS,DARKPOOL_EOD,STOCK_SCREENER or ALL",
+        help="Comma-separated sources: OI_DIFF,BOT_EOD,HOT_CHAINS,DARKPOOL_EOD,STOCK_SCREENER,OPTIONS_FLOW or ALL",
     )
     args = parser.parse_args()
 
@@ -97,7 +130,7 @@ def main() -> int:
 
     selected_sources: set[models.RawSource]
     if args.sources.strip().upper() == "ALL":
-        selected_sources = set(_PREFIX_TO_SOURCE.values())
+        selected_sources = set(_PREFIX_TO_SOURCE.values()) | {models.RawSource.OPTIONS_FLOW}
     else:
         selected_sources = set()
         for part in args.sources.split(","):
@@ -128,6 +161,24 @@ def main() -> int:
             continue
 
         by_date[date_str].append((source, p))
+
+    # Discover local options_flow files under sample_data/options_flow
+    multi_day_options_flow: list[Path] = []
+    options_dir = sample_dir / "options_flow"
+    if models.RawSource.OPTIONS_FLOW in selected_sources and options_dir.exists() and options_dir.is_dir():
+        for p in options_dir.iterdir():
+            if not p.is_file() or p.suffix.lower() != ".csv":
+                continue
+            d = _extract_date_anywhere(p.name)
+            if d:
+                if start and d < start:
+                    continue
+                if end and d > end:
+                    continue
+                by_date[d.isoformat()].append((models.RawSource.OPTIONS_FLOW, p))
+            else:
+                # Multi-day file; imported after the per-date loop (grouping by timestamp/date).
+                multi_day_options_flow.append(p)
 
     dates = sorted(by_date.keys())
     if not dates:
@@ -168,6 +219,17 @@ def main() -> int:
             total_imported += imported_here
             total_skipped += skipped_here
             print(f"  done: imported={imported_here} skipped={skipped_here}")
+
+    # Import multi-day options_flow CSVs (no date in filename) by grouping to sessions.
+    if multi_day_options_flow:
+        from app.ingest.local_files import import_local_options_flow_file
+
+        with session_scope() as db:
+            for p in sorted(multi_day_options_flow):
+                try:
+                    import_local_options_flow_file(db=db, filename=p.name, start_date=start, end_date=end)
+                except Exception as e:
+                    print(f"WARN: failed to import multi-day options flow file {p.name}: {e}")
 
     print(f"\nAll done. imported_files={total_imported} skipped_files={total_skipped}")
     return 0

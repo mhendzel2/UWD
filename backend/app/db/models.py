@@ -37,6 +37,7 @@ class RawSource(str, Enum):
     HOT_CHAINS = "HOT_CHAINS"
     DARKPOOL_EOD = "DARKPOOL_EOD"
     STOCK_SCREENER = "STOCK_SCREENER"
+    OPTIONS_FLOW = "OPTIONS_FLOW"
 
 
 class ParseStatus(str, Enum):
