@@ -28,6 +28,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen, Request
 
 import pandas as pd
+from sqlalchemy.orm import load_only
 
 from app.analysis.outlier_detection import analyze_from_session_data
 from app.db import models
@@ -44,20 +45,31 @@ class OutlierEvent:
     oi_diff: float
 
 
-def _iter_oi_rows(db, session_id: str) -> list[dict[str, Any]]:
-    files = (
+def _iter_oi_rows(db, session_id: str, *, max_rows: int | None = None) -> list[dict[str, Any]]:
+    # Avoid loading full ORM entities; RawFile.extras is large JSON and dominates.
+    q = (
         db.query(models.RawFile)
-        .filter(models.RawFile.session_id == session_id, models.RawFile.source == models.RawSource.OI_DIFF)
-        .all()
+        .options(load_only(models.RawFile.extras))
+        .filter(
+            models.RawFile.session_id == session_id,
+            models.RawFile.source == models.RawSource.OI_DIFF,
+            models.RawFile.parse_status == models.ParseStatus.OK,
+        )
     )
+
     rows: list[dict[str, Any]] = []
-    for rf in files:
-        if rf.extras and "rows" in rf.extras:
-            rows.extend(rf.extras["rows"])
+    for rf in q.yield_per(1):
+        extras = rf.extras
+        if not extras or "rows" not in extras:
+            continue
+        for row in extras["rows"]:
+            rows.append(row)
+            if max_rows is not None and len(rows) >= max_rows:
+                return rows
     return rows
 
 
-def _iter_baseline_rows(db, session_date: date, baseline_days: int) -> list[dict[str, Any]]:
+def _iter_baseline_rows(db, session_date: date, baseline_days: int, *, max_rows: int | None = None) -> list[dict[str, Any]]:
     if baseline_days <= 0:
         return []
     start = session_date - pd.Timedelta(days=baseline_days)
@@ -69,7 +81,10 @@ def _iter_baseline_rows(db, session_date: date, baseline_days: int) -> list[dict
     )
     baseline: list[dict[str, Any]] = []
     for s in sessions:
-        baseline.extend(_iter_oi_rows(db, str(s.session_id)))
+        remaining = None if max_rows is None else max_rows - len(baseline)
+        if remaining is not None and remaining <= 0:
+            break
+        baseline.extend(_iter_oi_rows(db, str(s.session_id), max_rows=remaining))
     return baseline
 
 
@@ -175,6 +190,12 @@ def main() -> int:
     parser.add_argument("--start-date", default=None)
     parser.add_argument("--end-date", default=None)
     parser.add_argument("--horizons", default="1,5,20", help="Comma-separated trading-day horizons")
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=None,
+        help="Optional cap on number of OI rows loaded per session (and for baseline). Useful for quicker test runs.",
+    )
     args = parser.parse_args()
 
     start = datetime.strptime(args.start_date, "%Y-%m-%d").date() if args.start_date else None
@@ -208,8 +229,8 @@ def main() -> int:
             if oi_files == 0:
                 continue
 
-            oi_rows = _iter_oi_rows(db, sid)
-            baseline_rows = _iter_baseline_rows(db, s.date, args.baseline_days)
+            oi_rows = _iter_oi_rows(db, sid, max_rows=args.max_rows)
+            baseline_rows = _iter_baseline_rows(db, s.date, args.baseline_days, max_rows=args.max_rows)
 
             print(f"Outliers {s.date} (rows={len(oi_rows)} baseline_rows={len(baseline_rows)})", flush=True)
             res = analyze_from_session_data(
