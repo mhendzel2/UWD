@@ -971,6 +971,45 @@ def main() -> None:
                 T0 = max((exp - entry_date).days / 365.0, 0.0)
                 theo_entry = _bs_price(S=close0, K=float(strike), T=T0, sigma=float(sigma), option_type=opt_type)
 
+            # Exit rule: if not 0DTE, exit at least 2 days prior to expiry.
+            if entry_date and exp:
+                is_0dte = (exp == entry_date)
+                last_allowed_exit = exp if is_0dte else (exp - timedelta(days=2))
+                if last_allowed_exit < entry_date:
+                    last_allowed_exit = entry_date
+
+                price_df = _load_cached_price_df(underlying)
+                if price_df is not None and not price_df.empty:
+                    price_df = price_df.sort_values("date")
+                    # Anchor to first trading day >= entry_date
+                    mask_anchor = price_df["date"] >= entry_date
+                    if mask_anchor.any():
+                        anchor_idx = int(price_df.index[mask_anchor][0])
+                        # Exit at last trading day <= last_allowed_exit
+                        mask_exit = price_df["date"] <= last_allowed_exit
+                        exit_idx = anchor_idx
+                        if mask_exit.any():
+                            exit_idx = int(price_df.index[mask_exit][-1])
+                        if exit_idx < anchor_idx:
+                            exit_idx = anchor_idx
+
+                        exit_trade_date = price_df.loc[exit_idx, "date"]
+                        exit_date = _to_date(exit_trade_date)
+                        try:
+                            close_h = float(price_df.loc[exit_idx, "close"])
+                        except Exception:
+                            close_h = None
+
+                        if close_h is not None and strike is not None:
+                            Tt = max((exp - (exit_date or entry_date)).days / 365.0, 0.0)
+                            theo_exit = _bs_price(
+                                S=close_h,
+                                K=float(strike),
+                                T=Tt,
+                                sigma=float(sigma),
+                                option_type=opt_type,
+                            )
+
             entry_px = entry_mid if (entry_mid is not None and entry_mid > 0) else theo_entry
             exit_px = theo_exit
 
@@ -987,6 +1026,7 @@ def main() -> None:
                 "type": opt_type,
                 "strike": strike or "",
                 "exp": exp.isoformat() if exp else "",
+                "exit_date": exit_date.isoformat() if exit_date else "",
                 "method": row.get("method"),
                 "score": row.get("score"),
                 "oi_diff": row.get("oi_diff"),
@@ -1033,10 +1073,13 @@ def main() -> None:
                             "type",
                             "strike",
                             "exp",
+                            "exit_date",
                             "method",
                             "score",
                             "oi_diff",
                             "entry_mid_used",
+                            "exit_mid_theo",
+                            "ret_%",
                             "sigma",
                         ]
                         if c in latest_out.columns
