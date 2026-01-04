@@ -930,8 +930,7 @@ def main() -> None:
             option_symbol = str(row.get("option_symbol") or "").strip().upper() or None
 
             entry_date = _to_date(row.get("anchor_date")) or _to_date(row.get("event_date"))
-            exit_date_raw = row.get(f"date_{picks_horizon}")
-            exit_date = _to_date(exit_date_raw)
+            exit_date = None
 
             close0 = _to_float(row.get("close_0"))
             close_h = None

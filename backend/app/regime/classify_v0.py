@@ -63,5 +63,7 @@ def classify(feature: FeaturesUnderlyingDay, computed_at: datetime | None = None
         conflicts={"items": conflicts} if conflicts else None,
         decision_version="v0",
         computed_at=computed_at,
-        feature=feature,
+        # Avoid backref cascade warnings when the returned decision is not yet
+        # attached to a DB session.
+        feature_id=getattr(feature, "feature_id", None),
     )
