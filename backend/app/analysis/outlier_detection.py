@@ -5,13 +5,24 @@ Implements three complementary outlier detection methods:
 1. Z-Score: Flags OI changes >3σ from mean (99.7% confidence)
 2. IQR Method: Robust to skewed distributions, flags 1.5×IQR extremes
 3. Pre-Event + Volume: OI spike + low volume + earnings proximity signals
+
+Enhanced with flow sentiment integration (v2):
+- Flow sentiment from BOT_EOD data boosts or penalizes outlier scores
+- Confirming flow (OI + flow agree) = score boost
+- Divergent flow (OI vs flow disagree) = score penalty
 """
 
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
+
+
+# Flow sentiment configuration
+FLOW_SENTIMENT_BOOST = 0.3  # Boost factor when flow confirms OI direction
+FLOW_SENTIMENT_PENALTY = 0.5  # Penalty factor when flow contradicts OI direction
+MIN_PREMIUM_THRESHOLD = 100_000  # Minimum $100k premium to consider flow meaningful
 
 
 @dataclass
@@ -33,6 +44,10 @@ class OutlierResult:
     sector: Optional[str]
     method: str
     score: float  # z-score, iqr-distance, or manipulation score
+    # Flow sentiment fields (v2)
+    flow_sentiment: Optional[float] = None  # -1 (bearish) to +1 (bullish)
+    flow_total_premium: Optional[float] = None
+    flow_adjusted_score: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -49,6 +64,132 @@ class OutlierSummary:
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def get_flow_sentiment_for_underlying(
+    underlying: str,
+    flow_metrics: Dict[str, Dict[str, Any]]
+) -> tuple[Optional[float], Optional[float]]:
+    """Get flow sentiment score and total premium for an underlying.
+    
+    Args:
+        underlying: The underlying symbol (e.g., 'AAPL')
+        flow_metrics: Dict of {underlying: {sentiment_score, total_premium, ...}}
+        
+    Returns:
+        Tuple of (sentiment_score, total_premium) or (None, None) if not found
+    """
+    # Try both upper and original case
+    metrics = flow_metrics.get(underlying.upper()) or flow_metrics.get(underlying)
+    if not metrics:
+        return None, None
+    
+    sentiment = metrics.get("sentiment_score")
+    total_premium = metrics.get("total_premium", 0)
+    
+    return sentiment, total_premium
+
+
+def apply_flow_sentiment_adjustment(
+    result: OutlierResult,
+    flow_metrics: Dict[str, Dict[str, Any]],
+    option_type: Optional[str] = None
+) -> OutlierResult:
+    """Apply flow sentiment adjustment to an outlier result.
+    
+    Logic:
+    - For CALL outliers: positive flow sentiment boosts, negative penalizes
+    - For PUT outliers: negative flow sentiment boosts, positive penalizes
+    - No adjustment if insufficient premium (<$100k)
+    
+    Args:
+        result: Original outlier result
+        flow_metrics: Dict of {underlying: {sentiment_score, total_premium, ...}}
+        option_type: 'call' or 'put' - inferred from option_symbol if not provided
+        
+    Returns:
+        Updated OutlierResult with flow-adjusted score
+    """
+    sentiment, total_premium = get_flow_sentiment_for_underlying(
+        result.underlying_symbol, flow_metrics
+    )
+    
+    # Store raw flow data regardless of adjustment
+    result.flow_sentiment = sentiment
+    result.flow_total_premium = total_premium
+    
+    # Don't adjust if no sentiment or insufficient premium
+    if sentiment is None or (total_premium or 0) < MIN_PREMIUM_THRESHOLD:
+        result.flow_adjusted_score = result.score
+        return result
+    
+    # Determine if this is a call or put from the option symbol
+    if option_type is None:
+        sym = result.option_symbol.upper()
+        # Standard OSI option symbol format: underlying + expiry + C/P + strike
+        option_type = "call" if "C" in sym[-15:-8] else "put" if "P" in sym[-15:-8] else None
+        # Fallback: check if C or P appears before the strike digits
+        if option_type is None:
+            for i, char in enumerate(sym):
+                if char in ("C", "P") and i > 0:
+                    option_type = "call" if char == "C" else "put"
+                    break
+    
+    # Determine OI direction (positive OI_diff = accumulation)
+    oi_direction = 1 if result.oi_diff > 0 else -1
+    
+    # Calculate flow impact
+    # For calls: bullish flow (positive sentiment) + positive OI = confirming
+    # For puts: bearish flow (negative sentiment) + positive OI = confirming
+    if option_type == "call":
+        # Call accumulation + bullish flow = confirming
+        flow_agrees = (oi_direction > 0 and sentiment > 0.2) or (oi_direction < 0 and sentiment < -0.2)
+        flow_disagrees = (oi_direction > 0 and sentiment < -0.2) or (oi_direction < 0 and sentiment > 0.2)
+    elif option_type == "put":
+        # Put accumulation + bearish flow = confirming
+        flow_agrees = (oi_direction > 0 and sentiment < -0.2) or (oi_direction < 0 and sentiment > 0.2)
+        flow_disagrees = (oi_direction > 0 and sentiment > 0.2) or (oi_direction < 0 and sentiment < -0.2)
+    else:
+        # Unknown option type, no adjustment
+        result.flow_adjusted_score = result.score
+        return result
+    
+    # Apply adjustment
+    if flow_agrees:
+        # Boost: multiply by (1 + boost_factor * |sentiment|)
+        adjustment = 1 + FLOW_SENTIMENT_BOOST * abs(sentiment)
+        result.flow_adjusted_score = result.score * adjustment
+    elif flow_disagrees:
+        # Penalty: multiply by (1 - penalty_factor * |sentiment|)
+        adjustment = max(0.1, 1 - FLOW_SENTIMENT_PENALTY * abs(sentiment))
+        result.flow_adjusted_score = result.score * adjustment
+    else:
+        # Neutral sentiment, no change
+        result.flow_adjusted_score = result.score
+    
+    return result
+
+
+def enhance_results_with_flow(
+    results: List[OutlierResult],
+    flow_metrics: Dict[str, Dict[str, Any]]
+) -> List[OutlierResult]:
+    """Enhance a list of outlier results with flow sentiment data.
+    
+    Args:
+        results: List of OutlierResult objects
+        flow_metrics: Dict of {underlying: {sentiment_score, total_premium, ...}}
+        
+    Returns:
+        Updated list with flow-adjusted scores
+    """
+    if not flow_metrics:
+        # No flow data, just set adjusted = original
+        for r in results:
+            r.flow_adjusted_score = r.score
+        return results
+    
+    return [apply_flow_sentiment_adjustment(r, flow_metrics) for r in results]
 
 
 def load_oi_data(file_path: Path) -> pd.DataFrame:
@@ -475,8 +616,20 @@ def run_all_detection_methods(
     earnings_days: int = 14,
     chain_pct: float = 0.20,
     baseline_df: Optional[pd.DataFrame] = None,
+    flow_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Run all outlier detection methods and return combined results"""
+    """Run all outlier detection methods and return combined results
+    
+    Args:
+        df: DataFrame with OI data
+        zscore_threshold: Z-score threshold for outlier detection
+        iqr_multiplier: IQR multiplier for outlier detection
+        earnings_days: Days to earnings threshold
+        chain_pct: Chain percentage threshold
+        baseline_df: Optional baseline DataFrame for z-score/IQR calculation
+        flow_metrics: Optional dict of {underlying: {sentiment_score, total_premium, ...}}
+                      for flow-adjusted scoring
+    """
     
     # Run each method
     baseline_series = None
@@ -498,6 +651,16 @@ def run_all_detection_methods(
         earnings_threshold_days=earnings_days,
         chain_percentage_threshold=chain_pct
     )
+    
+    # Enhance results with flow sentiment if available
+    if flow_metrics:
+        zscore_results = enhance_results_with_flow(zscore_results, flow_metrics)
+        iqr_results = enhance_results_with_flow(iqr_results, flow_metrics)
+        preevent_results = enhance_results_with_flow(preevent_results, flow_metrics)
+    else:
+        # Set adjusted score = original score when no flow data
+        for r in zscore_results + iqr_results + preevent_results:
+            r.flow_adjusted_score = r.score
     
     # Get distribution stats
     dist_stats = get_distribution_stats(df)
@@ -522,7 +685,8 @@ def run_all_detection_methods(
         },
         'distribution': dist_stats,
         'unique_symbols': len(all_symbols),
-        'total_outliers': len(zscore_results) + len(iqr_results) + len(preevent_results)
+        'total_outliers': len(zscore_results) + len(iqr_results) + len(preevent_results),
+        'flow_enhanced': flow_metrics is not None
     }
 
 
