@@ -10,12 +10,14 @@ from sqlalchemy import (
     DateTime,
     Enum as PgEnum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     JSON,
+    desc,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -108,6 +110,8 @@ class Session(Base):
     logs = relationship("LogMessage", back_populates="session", cascade="all, delete-orphan")
     daily_briefs = relationship("DailyBrief", back_populates="session", cascade="all, delete-orphan")
     ensembles = relationship("EnsembleDecision", back_populates="session", cascade="all, delete-orphan")
+    anomaly_events = relationship("AnomalyEvent", back_populates="session", cascade="all, delete-orphan")
+    anomaly_rollups = relationship("AnomalyTickerRollup", back_populates="session", cascade="all, delete-orphan")
 
 
 class RawFile(Base):
@@ -250,6 +254,51 @@ class LogMessage(Base):
     context = Column(JSON, nullable=True)
 
     session = relationship("Session", back_populates="logs")
+
+
+class AnomalyEvent(Base):
+    __tablename__ = "anomaly_events"
+    __table_args__ = (
+        UniqueConstraint("session_id", "source", "event_key", name="uq_anomaly_event_key"),
+        Index("ix_anomaly_events_session_severity", "session_id", desc("severity_score")),
+        Index("ix_anomaly_events_session_ticker", "session_id", "ticker"),
+        Index("ix_anomaly_events_session_source", "session_id", "source"),
+    )
+
+    anomaly_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    source = Column(PgEnum(RawSource, name="raw_source"), nullable=False)
+    event_key = Column(String(255), nullable=False)
+    ticker = Column(String(32), nullable=False)
+    severity_score = Column(Numeric(14, 6), nullable=False)
+    ensemble_score = Column(Numeric(10, 6), nullable=False)
+    reason_codes = Column(JSON, nullable=False)
+    feature_payload = Column(JSON, nullable=False)
+    raw_ref = Column(JSON, nullable=True)
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    session = relationship("Session", back_populates="anomaly_events")
+
+
+class AnomalyTickerRollup(Base):
+    __tablename__ = "anomaly_ticker_rollups"
+    __table_args__ = (
+        UniqueConstraint("session_id", "ticker", name="uq_anomaly_ticker"),
+        Index("ix_anomaly_rollups_session_severity", "session_id", desc("severity_score")),
+        Index("ix_anomaly_rollups_session_ticker", "session_id", "ticker"),
+    )
+
+    rollup_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    ticker = Column(String(32), nullable=False)
+    severity_score = Column(Numeric(14, 6), nullable=False)
+    ensemble_score = Column(Numeric(10, 6), nullable=False)
+    reason_codes = Column(JSON, nullable=False)
+    feature_payload = Column(JSON, nullable=True)
+    raw_ref = Column(JSON, nullable=True)
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    session = relationship("Session", back_populates="anomaly_rollups")
 
 
 class DailyBrief(Base):

@@ -1,0 +1,341 @@
+.anomalyPanel {
+  background: radial-gradient(circle at 10% 20%, #1f2937 0, #0b1224 45%, #070c19 100%);
+  color: #d5e8ff;
+  border: 1px solid #1f2a44;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  font-family: "DM Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.anomalyHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+
+.title {
+  margin: 4px 0;
+  font-size: 22px;
+  color: #f1f5f9;
+}
+
+.subtitle {
+  color: #9fb4d3;
+  margin: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(125, 211, 252, 0.12);
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+
+.chipLabel {
+  font-size: 12px;
+  color: #9fb4d3;
+}
+
+.chipInput {
+  width: 60px;
+  background: transparent;
+  border: none;
+  color: #e0f2ff;
+  font-weight: 600;
+  text-align: right;
+}
+
+.chipSuffix {
+  font-size: 12px;
+  color: #7dd3fc;
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.control {
+  display: grid;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.control input,
+.control select {
+  background: #0f172a;
+  color: #e0f2ff;
+  border: 1px solid #1f2a44;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.control .ghost {
+  background: transparent;
+  border: 1px solid #334155;
+}
+
+.control button {
+  background: linear-gradient(90deg, #38bdf8, #3b82f6);
+  border: none;
+  color: #0b1224;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.control.actions {
+  align-items: end;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.error {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fecdd3;
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.summaryRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid #1f2a44;
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+
+.pill.highlight {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.15), rgba(59, 130, 246, 0.15));
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.pillLabel {
+  font-size: 12px;
+  color: #9fb4d3;
+}
+
+.pillValue {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.pillHint {
+  font-size: 12px;
+  color: #7dd3fc;
+}
+
+.tableWrap {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #1f2a44;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.anomalyTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.anomalyTable th {
+  text-align: left;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.anomalyTable td {
+  padding: 10px;
+  border-top: 1px solid #1f2a44;
+}
+
+.anomalyTable tr:hover {
+  background: rgba(56, 189, 248, 0.04);
+  cursor: pointer;
+}
+
+.selectedRow {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.reasonCell {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.reasonChip {
+  background: rgba(56, 189, 248, 0.12);
+  color: #bfe4ff;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-size: 12px;
+}
+
+.eventKey {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.empty {
+  padding: 12px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.detailDrawer {
+  margin-top: 14px;
+  border: 1px solid #1f2a44;
+  border-radius: 12px;
+  padding: 12px;
+  background: #0f1628;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.detailHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detailTitle {
+  margin: 0;
+  color: #e2e8f0;
+}
+
+.smallMuted {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.scoreBlock {
+  text-align: right;
+}
+
+.scoreBlock.compact {
+  min-width: 120px;
+}
+
+.scoreLabel {
+  font-size: 12px;
+  color: #9fb4d3;
+}
+
+.scoreValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+
+.scoreHint {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.reasonList {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.reasonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bullet {
+  width: 8px;
+  height: 8px;
+  background: linear-gradient(90deg, #38bdf8, #3b82f6);
+  border-radius: 50%;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.featureCard {
+  border: 1px solid #1f2a44;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.featureName {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.featureValue {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.featureMeta {
+  display: flex;
+  justify-content: space-between;
+  color: #9fb4d3;
+  font-size: 12px;
+}
+
+.rollupCard {
+  margin-top: 10px;
+  border: 1px dashed #38bdf8;
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.rollupHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rollupTitle {
+  font-size: 18px;
+  color: #e2e8f0;
+}
+
+.rollupReasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}

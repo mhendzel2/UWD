@@ -1,11 +1,12 @@
 import tempfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
+from app.anomalies import compute_anomalies_for_session, ScoredAnomaly, TickerRollup
 from app.api.ws import notify_decision, notify_log
 from app.briefs.generate_v1 import generate_briefs
 from app.db.engine import SessionLocal
@@ -203,6 +204,63 @@ def _copy_attrs(source: Any, target: Any):
         if key.startswith("_"):
             continue
         setattr(target, key, value)
+
+
+def _serialize_anomaly_scored(ev: ScoredAnomaly) -> Dict[str, Any]:
+    return {
+        "source": ev.source.value,
+        "ticker": ev.ticker,
+        "event_key": ev.event_key,
+        "severity_score": ev.severity_score,
+        "ensemble_score": ev.ensemble_score,
+        "reason_codes": ev.reason_codes,
+        "feature_payload": ev.feature_payload,
+        "raw_ref": ev.raw_ref,
+    }
+
+
+def _serialize_anomaly_model(ev: models.AnomalyEvent) -> Dict[str, Any]:
+    return {
+        "source": ev.source.value if ev.source else None,
+        "ticker": ev.ticker,
+        "event_key": ev.event_key,
+        "severity_score": float(ev.severity_score) if ev.severity_score is not None else None,
+        "ensemble_score": float(ev.ensemble_score) if ev.ensemble_score is not None else None,
+        "reason_codes": ev.reason_codes or [],
+        "feature_payload": ev.feature_payload,
+        "raw_ref": ev.raw_ref,
+        "computed_at": ev.computed_at.isoformat() if ev.computed_at else None,
+    }
+
+
+def _serialize_rollup(ru: TickerRollup | models.AnomalyTickerRollup) -> Dict[str, Any]:
+    if isinstance(ru, TickerRollup):
+        return {
+            "ticker": ru.ticker,
+            "severity_score": ru.severity_score,
+            "ensemble_score": ru.ensemble_score,
+            "reason_codes": ru.reason_codes,
+            "feature_payload": ru.feature_payload,
+            "raw_ref": ru.raw_ref,
+        }
+    return {
+        "ticker": ru.ticker,
+        "severity_score": float(ru.severity_score) if ru.severity_score is not None else None,
+        "ensemble_score": float(ru.ensemble_score) if ru.ensemble_score is not None else None,
+        "reason_codes": ru.reason_codes or [],
+        "feature_payload": ru.feature_payload,
+        "raw_ref": ru.raw_ref,
+        "computed_at": ru.computed_at.isoformat() if ru.computed_at else None,
+    }
+
+
+def _parse_optional_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid datetime: {value}") from exc
 
 
 @router.post("/compute/v0")
@@ -405,6 +463,79 @@ def compute_v1(
     db.commit()
     notify_decision({"type": "ensemble", "session_id": session_id, "count": len(ensembles)})
     return {"ensembles": ensembles}
+
+
+@router.post("/compute/anomalies_v1")
+def compute_anomalies_v1(
+    session_id: str = Form(...),
+    lookback_sessions: int = Form(30),
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    lookback = max(0, min(lookback_sessions, 180))
+    result = compute_anomalies_for_session(db, session, lookback_sessions=lookback)
+    events_payload = [_serialize_anomaly_scored(ev) for ev in result["events"][:100]]
+    rollups_payload = [_serialize_rollup(r) for r in result["rollups"]]
+
+    db.add(
+        models.LogMessage(
+            session_id=session_id,
+            level=models.LogLevel.INFO,
+            message="Computed anomaly review queue v1",
+            context={"counts": result["summary"], "lookback_sessions": lookback},
+        )
+    )
+    db.commit()
+    notify_decision({"type": "anomalies_v1_complete", "session_id": session_id, "counts": result["summary"]})
+    return {
+        "summary": result["summary"],
+        "events": events_payload,
+        "rollups": rollups_payload,
+    }
+
+
+@router.get("/sessions/{session_id}/anomalies")
+def get_anomalies(
+    session_id: str,
+    ticker: str | None = None,
+    source: models.RawSource | None = None,
+    min_score: float = 0.0,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    query = db.query(models.AnomalyEvent).filter(models.AnomalyEvent.session_id == session_id)
+    if ticker:
+        query = query.filter(models.AnomalyEvent.ticker == ticker.upper())
+    if source:
+        query = query.filter(models.AnomalyEvent.source == source)
+    if min_score:
+        query = query.filter(models.AnomalyEvent.severity_score >= min_score)
+    start_ts = _parse_optional_ts(start_time)
+    end_ts = _parse_optional_ts(end_time)
+    if start_ts:
+        query = query.filter(models.AnomalyEvent.computed_at >= start_ts)
+    if end_ts:
+        query = query.filter(models.AnomalyEvent.computed_at <= end_ts)
+    events = query.order_by(models.AnomalyEvent.severity_score.desc()).limit(limit).all()
+
+    rollups = (
+        db.query(models.AnomalyTickerRollup)
+        .filter(models.AnomalyTickerRollup.session_id == session_id)
+        .order_by(models.AnomalyTickerRollup.severity_score.desc())
+        .all()
+    )
+    return {
+        "events": [_serialize_anomaly_model(e) for e in events],
+        "rollups": [_serialize_rollup(r) for r in rollups],
+    }
 
 
 @router.get("/sessions/{session_id}/summary")
