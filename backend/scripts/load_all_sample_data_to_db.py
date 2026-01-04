@@ -72,9 +72,12 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
     if existing_id:
         return False
 
+    rows_count = 0
+
     # BOT_EOD large-file import: store only per-underlying aggregates (no full row payload).
     if source == models.RawSource.BOT_EOD and file_size > 50 * 1024 * 1024:
         headers, agg, row_count = bot_eod.aggregate_csv(path)
+        rows_count = row_count
         raw_file = models.RawFile(
             session_id=session_id,
             source=source,
@@ -86,6 +89,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
         )
     else:
         parsed = routes._dispatch_parser(source, path)
+        rows_count = len(parsed.rows)
         raw_file = models.RawFile(
             session_id=session_id,
             source=source,
@@ -102,7 +106,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
             session_id=session_id,
             level=models.LogLevel.INFO,
             message=f"Imported {path.name}",
-            context={"source": source.value, "rows": len(parsed.rows)},
+            context={"source": source.value, "rows": rows_count},
         )
     )
     return True
