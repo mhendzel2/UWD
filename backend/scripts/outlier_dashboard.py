@@ -154,6 +154,111 @@ def _snip_log(text: str, max_chars: int = 8000) -> str:
     return "…\n" + text[-max_chars:]
 
 
+def _show_method_performance_stats() -> None:
+    """Display method performance statistics from the database."""
+    db_url = _require_db_url()
+    if not db_url:
+        st.info("Database not connected. Connect to view historical performance stats.")
+        return
+    
+    try:
+        from app.db.engine import session_scope
+        from app.db import models
+        from app.analysis.success_rate import get_performance_summary, get_all_method_performances
+    except ImportError as e:
+        st.warning(f"Could not import success_rate module: {e}")
+        return
+    
+    try:
+        with session_scope() as db:
+            # Check if we have any outcomes
+            outcome_count = db.query(models.OutlierOutcome).count()
+            if outcome_count == 0:
+                st.info(
+                    "No outcome data available yet. Run `backfill_outlier_outcomes.py` to populate historical outcomes."
+                )
+                return
+            
+            summary = get_performance_summary(db, lookback_days=90)
+            
+            # Overall stats
+            overall = summary.get("_overall", {})
+            st.markdown(f"**Overall Performance (90-day lookback): {overall.get('total_signals', 0)} signals**")
+            
+            if overall.get("win_rate") is not None:
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Signals", overall.get("total_signals", 0))
+                col2.metric("Win Count", overall.get("win_count", 0))
+                col3.metric("Win Rate", f"{overall['win_rate']:.1%}" if overall.get("win_rate") else "N/A")
+            
+            st.markdown("---")
+            st.markdown("**Performance by Method**")
+            
+            # Method-level stats table
+            method_rows = []
+            for method in ["Z-Score", "IQR", "Pre-Event"]:
+                m = summary.get(method, {})
+                if m.get("total_signals", 0) > 0:
+                    method_rows.append({
+                        "Method": method,
+                        "Signals": m.get("total_signals", 0),
+                        "Wins": m.get("win_count", 0),
+                        "Losses": m.get("loss_count", 0),
+                        "Win Rate": f"{m['win_rate']:.1%}" if m.get("win_rate") else "N/A",
+                        "Avg Return": f"{m['avg_return']:.2%}" if m.get("avg_return") else "N/A",
+                        "Sharpe": f"{m['sharpe_ratio']:.2f}" if m.get("sharpe_ratio") else "N/A",
+                        "Rec. Threshold": f"{m['recommended_threshold']:.2f}" if m.get("recommended_threshold") else "—",
+                        "Confidence": m.get("confidence_level", "N/A"),
+                    })
+            
+            if method_rows:
+                st.dataframe(pd.DataFrame(method_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No method-level statistics available.")
+            
+            # Top/Bottom performing underlyings
+            perfs = get_all_method_performances(db, lookback_days=90)
+            underlying_perfs = [p for p in perfs if p.underlying_symbol and p.total_signals >= 5]
+            
+            if underlying_perfs:
+                st.markdown("---")
+                col_top, col_bot = st.columns(2)
+                
+                with col_top:
+                    st.markdown("**🏆 Top 5 Underlyings (by win rate)**")
+                    top_perfs = sorted(
+                        [p for p in underlying_perfs if p.win_rate is not None],
+                        key=lambda p: p.win_rate or 0,
+                        reverse=True,
+                    )[:5]
+                    if top_perfs:
+                        top_rows = [{
+                            "Symbol": p.underlying_symbol,
+                            "Method": p.method,
+                            "Signals": p.total_signals,
+                            "Win Rate": f"{p.win_rate:.0%}" if p.win_rate else "N/A",
+                        } for p in top_perfs]
+                        st.dataframe(pd.DataFrame(top_rows), use_container_width=True, hide_index=True)
+                
+                with col_bot:
+                    st.markdown("**⚠️ Bottom 5 Underlyings (by win rate)**")
+                    bot_perfs = sorted(
+                        [p for p in underlying_perfs if p.win_rate is not None],
+                        key=lambda p: p.win_rate or 0,
+                    )[:5]
+                    if bot_perfs:
+                        bot_rows = [{
+                            "Symbol": p.underlying_symbol,
+                            "Method": p.method,
+                            "Signals": p.total_signals,
+                            "Win Rate": f"{p.win_rate:.0%}" if p.win_rate else "N/A",
+                        } for p in bot_perfs]
+                        st.dataframe(pd.DataFrame(bot_rows), use_container_width=True, hide_index=True)
+    
+    except Exception as e:
+        st.error(f"Error loading performance stats: {e}")
+
+
 def _import_uploaded_csvs_to_db(*, files: Iterable[st.runtime.uploaded_file_manager.UploadedFile], target_date: str) -> tuple[str, str]:
     """Import uploaded CSVs into Postgres as RawFile records.
 
@@ -780,6 +885,10 @@ def main() -> None:
     c3.metric("Methods", int(f["method"].nunique()) if "method" in f.columns else 0)
     if "event_date" in f.columns and f["event_date"].notna().any():
         c4.metric("Date span", f"{f['event_date'].min()} → {f['event_date'].max()}")
+
+    # Method Performance Section (Phase 2: Feedback Loop)
+    with st.expander("📊 Method Performance Stats", expanded=False):
+        _show_method_performance_stats()
 
     # Layout
     left, right = st.columns([2, 1])

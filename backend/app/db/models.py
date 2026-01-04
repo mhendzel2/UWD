@@ -484,3 +484,117 @@ class DailyEquityCurve(Base):
     trades_closed = Column(Integer, nullable=False, default=0)
     
     backtest_run = relationship("BacktestRun", back_populates="equity_curve")
+
+
+# =============================================================================
+# Outlier Outcome Tracking (Phase 2: Feedback Loop)
+# =============================================================================
+
+class OutlierOutcomeLabel(str, Enum):
+    """Classification of outlier trade outcomes"""
+    WIN = "WIN"        # Return >= win_threshold (default 5%)
+    LOSS = "LOSS"      # Return <= loss_threshold (default -5%)
+    NEUTRAL = "NEUTRAL"  # Return between thresholds
+
+
+class OutlierOutcome(Base):
+    """
+    Stores historical outcomes for outlier detection signals.
+    Used for:
+    - Tracking win rates by method/underlying/sector
+    - Training ML models
+    - Dynamic threshold adjustment
+    """
+    __tablename__ = "outlier_outcomes"
+    __table_args__ = (
+        UniqueConstraint("event_date", "underlying_symbol", "option_symbol", "method", name="uq_outlier_outcome"),
+        Index("ix_outlier_outcomes_date", "event_date"),
+        Index("ix_outlier_outcomes_underlying", "underlying_symbol"),
+        Index("ix_outlier_outcomes_method", "method"),
+        Index("ix_outlier_outcomes_label", "outcome_label"),
+    )
+
+    outcome_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    
+    # Event identification
+    event_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    option_symbol = Column(String(64), nullable=True)
+    method = Column(String(32), nullable=False)  # Z-Score, IQR, Pre-Event
+    
+    # Signal details at time of detection
+    score = Column(Numeric(14, 6), nullable=False)
+    flow_sentiment = Column(Numeric(10, 6), nullable=True)
+    flow_adjusted_score = Column(Numeric(14, 6), nullable=True)
+    oi_diff = Column(Numeric(14, 2), nullable=True)
+    strike = Column(Numeric(12, 4), nullable=True)
+    dte = Column(Integer, nullable=True)
+    sector = Column(String(64), nullable=True)
+    
+    # Entry details
+    entry_date = Column(Date, nullable=False)
+    entry_price_underlying = Column(Numeric(12, 4), nullable=True)
+    entry_price_option = Column(Numeric(12, 4), nullable=True)
+    
+    # Exit/outcome details
+    exit_date = Column(Date, nullable=True)
+    exit_price_underlying = Column(Numeric(12, 4), nullable=True)
+    exit_price_option = Column(Numeric(12, 4), nullable=True)
+    holding_days = Column(Integer, nullable=True)
+    
+    # Returns at various horizons
+    return_1d = Column(Numeric(10, 6), nullable=True)
+    return_5d = Column(Numeric(10, 6), nullable=True)
+    return_20d = Column(Numeric(10, 6), nullable=True)
+    
+    # Outcome classification
+    outcome_label = Column(PgEnum(OutlierOutcomeLabel, name="outlier_outcome_label"), nullable=True)
+    win_threshold_used = Column(Numeric(6, 4), nullable=False, default=0.05)  # 5% default
+    loss_threshold_used = Column(Numeric(6, 4), nullable=False, default=-0.05)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class OutlierMethodStats(Base):
+    """
+    Pre-computed success statistics by method, underlying, and sector.
+    Updated periodically to avoid expensive real-time aggregations.
+    """
+    __tablename__ = "outlier_method_stats"
+    __table_args__ = (
+        UniqueConstraint("method", "underlying_symbol", "sector", "lookback_days", name="uq_method_stats"),
+        Index("ix_method_stats_method", "method"),
+        Index("ix_method_stats_underlying", "underlying_symbol"),
+    )
+
+    stats_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    
+    # Grouping keys
+    method = Column(String(32), nullable=False)
+    underlying_symbol = Column(String(32), nullable=True)  # NULL = all underlyings
+    sector = Column(String(64), nullable=True)  # NULL = all sectors
+    lookback_days = Column(Integer, nullable=False, default=90)
+    
+    # Computed statistics
+    total_signals = Column(Integer, nullable=False, default=0)
+    win_count = Column(Integer, nullable=False, default=0)
+    loss_count = Column(Integer, nullable=False, default=0)
+    neutral_count = Column(Integer, nullable=False, default=0)
+    
+    win_rate = Column(Numeric(6, 4), nullable=True)  # win_count / total_signals
+    avg_return = Column(Numeric(10, 6), nullable=True)
+    median_return = Column(Numeric(10, 6), nullable=True)
+    sharpe_ratio = Column(Numeric(10, 6), nullable=True)
+    
+    # Best/worst performance
+    best_return = Column(Numeric(10, 6), nullable=True)
+    worst_return = Column(Numeric(10, 6), nullable=True)
+    
+    # Dynamic threshold recommendations
+    recommended_score_threshold = Column(Numeric(10, 4), nullable=True)
+    
+    # Metadata
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    as_of_date = Column(Date, nullable=False)

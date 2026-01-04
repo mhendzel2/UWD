@@ -629,6 +629,9 @@ def run_all_detection_methods(
         baseline_df: Optional baseline DataFrame for z-score/IQR calculation
         flow_metrics: Optional dict of {underlying: {sentiment_score, total_premium, ...}}
                       for flow-adjusted scoring
+    
+    Note: For dynamic thresholds based on historical performance, use 
+    run_all_detection_methods_with_feedback() instead.
     """
     
     # Run each method
@@ -769,3 +772,97 @@ def analyze_from_session_data(
         baseline_df=baseline_df,
         flow_metrics=flow_metrics,
     )
+
+
+def run_with_dynamic_thresholds(
+    db,  # SQLAlchemy session
+    oi_data: List[Dict[str, Any]],
+    baseline_oi_data: Optional[List[Dict[str, Any]]] = None,
+    flow_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
+    base_zscore_threshold: float = 3.0,
+    base_iqr_multiplier: float = 1.5,
+    earnings_days: int = 14,
+    chain_pct: float = 0.20,
+    use_dynamic_thresholds: bool = True,
+) -> Dict[str, Any]:
+    """Run outlier detection with dynamic thresholds based on historical performance.
+    
+    This function retrieves recommended thresholds from the success_rate module
+    based on historical win rates and adjusts detection parameters accordingly.
+    
+    Args:
+        db: SQLAlchemy session for querying historical performance
+        oi_data: List of OI change rows
+        baseline_oi_data: Optional baseline data for z-score/IQR calculation
+        flow_metrics: Optional dict for flow-adjusted scoring
+        base_zscore_threshold: Default z-score threshold (may be adjusted)
+        base_iqr_multiplier: Default IQR multiplier (may be adjusted)
+        earnings_days: Days to earnings threshold
+        chain_pct: Chain percentage threshold
+        use_dynamic_thresholds: If True, adjust thresholds based on history
+        
+    Returns:
+        Dict with detection results plus threshold info
+    """
+    from app.analysis.success_rate import get_dynamic_threshold, get_method_performance
+    
+    zscore_threshold = base_zscore_threshold
+    iqr_multiplier = base_iqr_multiplier
+    threshold_adjustments = {}
+    
+    if use_dynamic_thresholds and db is not None:
+        try:
+            # Get dynamic z-score threshold
+            dyn_zscore = get_dynamic_threshold(db, "Z-Score", base_threshold=base_zscore_threshold)
+            if dyn_zscore != base_zscore_threshold:
+                threshold_adjustments["zscore"] = {
+                    "base": base_zscore_threshold,
+                    "dynamic": dyn_zscore,
+                    "reason": "Adjusted based on historical win rate",
+                }
+                zscore_threshold = dyn_zscore
+            
+            # Get dynamic IQR multiplier (same logic, different base)
+            dyn_iqr = get_dynamic_threshold(db, "IQR", base_threshold=base_iqr_multiplier)
+            if dyn_iqr != base_iqr_multiplier:
+                threshold_adjustments["iqr"] = {
+                    "base": base_iqr_multiplier,
+                    "dynamic": dyn_iqr,
+                    "reason": "Adjusted based on historical win rate",
+                }
+                iqr_multiplier = dyn_iqr
+            
+            # Get performance summaries for context
+            for method in ["Z-Score", "IQR", "Pre-Event"]:
+                perf = get_method_performance(db, method)
+                if perf:
+                    threshold_adjustments[f"{method.lower().replace('-', '_')}_perf"] = {
+                        "win_rate": perf.win_rate,
+                        "total_signals": perf.total_signals,
+                        "confidence": perf.confidence_level,
+                    }
+        except Exception as e:
+            # If dynamic threshold lookup fails, continue with base thresholds
+            threshold_adjustments["error"] = str(e)
+    
+    # Run the main detection
+    results = analyze_from_session_data(
+        oi_data,
+        zscore_threshold=zscore_threshold,
+        iqr_multiplier=iqr_multiplier,
+        earnings_days=earnings_days,
+        chain_pct=chain_pct,
+        baseline_oi_data=baseline_oi_data,
+        flow_metrics=flow_metrics,
+    )
+    
+    # Add threshold adjustment info to results
+    results["threshold_adjustments"] = threshold_adjustments
+    results["thresholds_used"] = {
+        "zscore": zscore_threshold,
+        "iqr_multiplier": iqr_multiplier,
+        "earnings_days": earnings_days,
+        "chain_pct": chain_pct,
+    }
+    
+    return results
