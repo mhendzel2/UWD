@@ -37,11 +37,44 @@ def _repo_backend_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _repo_root() -> Path:
+    return _repo_backend_root().parents[0]
+
+
 _FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
 
 
 def _require_db_url() -> str | None:
     return os.environ.get("UW_DATABASE_URL")
+
+
+def _run_sample_data_sync(*, sample_data_dir: str, start_date: date | None = None, end_date: date | None = None) -> tuple[int, str]:
+    """Scan sample_data folder and import any new/updated files into Postgres.
+
+    Uses scripts/load_all_sample_data_to_db.py which de-dupes by sha256.
+    """
+    db_url = _require_db_url()
+    if not db_url:
+        return 2, "UW_DATABASE_URL is not set; cannot import sample_data into DB."
+
+    root = _repo_backend_root()
+    script = root / "scripts" / "load_all_sample_data_to_db.py"
+    cmd = [sys.executable, "-u", str(script), "--sample-data-dir", str(sample_data_dir)]
+    if start_date:
+        cmd += ["--start-date", start_date.isoformat()]
+    if end_date:
+        cmd += ["--end-date", end_date.isoformat()]
+
+    env = dict(os.environ)
+    env["UW_DATABASE_URL"] = db_url
+
+    try:
+        p = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
+    except Exception as e:
+        return 2, f"Failed to run sample_data sync: {e}"
+
+    out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
+    return int(p.returncode or 0), out.strip()
 
 
 def _latest_session_date_from_db() -> date | None:
@@ -302,17 +335,149 @@ def main() -> None:
     st.title("UWD – Outlier Performance Dashboard")
 
     root = _repo_backend_root()
+    repo_root = _repo_root()
     default_events = str(root / "tmp" / "outlier_events.csv")
     default_summary = str(root / "tmp" / "outlier_summary.csv")
+    default_sample_data_dir = str(repo_root / "sample_data")
+
+    # Sidebar state defaults
+    if "_uwd_recompute_full_history_after_sync" not in st.session_state:
+        st.session_state["_uwd_recompute_full_history_after_sync"] = True
+    if "_uwd_sync_only_latest" not in st.session_state:
+        st.session_state["_uwd_sync_only_latest"] = False
+
+    def _on_change_recompute_full_history_after_sync() -> None:
+        if st.session_state.get("_uwd_recompute_full_history_after_sync"):
+            # Full-history recompute implies we should ingest all dates, not just latest.
+            st.session_state["_uwd_sync_only_latest"] = False
 
     with st.sidebar:
+        st.header("Ingest")
+        sample_data_dir = st.text_input("sample_data directory", value=default_sample_data_dir)
+        sync_on_startup = st.checkbox("Sync sample_data on startup", value=True)
+        sync_only_latest = st.checkbox("Sync only latest date", key="_uwd_sync_only_latest")
+
+        st.subheader("Recompute")
+        baseline_days = st.number_input("Baseline days", value=0, min_value=0, step=1)
+        top_n = st.number_input("Top N per method", value=10, min_value=1, step=1)
+        recompute_full_history_after_sync = st.checkbox(
+            "Recompute full history after sync",
+            key="_uwd_recompute_full_history_after_sync",
+            on_change=_on_change_recompute_full_history_after_sync,
+        )
+
+        if st.button("Refresh: sync sample_data + recompute"):
+            if not _require_db_url():
+                st.error("UW_DATABASE_URL is not set; cannot sync.")
+                st.stop()
+            with st.spinner("Syncing sample_data into Postgres..."):
+                if sync_only_latest:
+                    latest_db_date = _latest_session_date_from_db()
+                    # If DB has no sessions yet, do a full sync.
+                    rc, out = _run_sample_data_sync(
+                        sample_data_dir=sample_data_dir,
+                        start_date=latest_db_date,
+                        end_date=None,
+                    )
+                else:
+                    rc, out = _run_sample_data_sync(sample_data_dir=sample_data_dir)
+            st.caption("Sync log")
+            st.code(_snip_log(out) or "(no output)")
+            if rc != 0:
+                st.error("Sync failed. Check log above.")
+                st.stop()
+
+            # After sync, recompute full history (default) or latest day.
+            dmin, dmax = _session_date_range_from_db()
+            latest_db_date = dmax
+            if recompute_full_history_after_sync and dmin and dmax:
+                with st.spinner(f"Recomputing outlier report for full history ({dmin} → {dmax})..."):
+                    rc2, out2 = _run_outlier_report_for_range(
+                        start=dmin,
+                        end=dmax,
+                        baseline_days=int(baseline_days),
+                        top_n=int(top_n),
+                    )
+                st.caption("Recompute log")
+                st.code(_snip_log(out2) or "(no output)")
+                if rc2 != 0:
+                    st.error("Recompute failed. Check log above.")
+                    st.stop()
+            elif latest_db_date:
+                with st.spinner(f"Recomputing outlier report for latest date {latest_db_date}..."):
+                    rc2, out2 = _run_outlier_report_for_range(
+                        start=latest_db_date,
+                        end=latest_db_date,
+                        baseline_days=int(baseline_days),
+                        top_n=int(top_n),
+                    )
+                st.caption("Recompute log")
+                st.code(_snip_log(out2) or "(no output)")
+                if rc2 != 0:
+                    st.error("Recompute failed. Check log above.")
+                    st.stop()
+            _load_events_csv.clear()
+            _load_summary_csv.clear()
+            st.success("Refreshed.")
+            st.rerun()
+
         st.header("Data")
         source = st.radio("Data source", ["CSV outputs", "Postgres tables"], index=0)
 
         st.subheader("Latest")
         auto_latest = st.checkbox("Auto-analyze latest date", value=True)
-        baseline_days = st.number_input("Baseline days", value=0, min_value=0, step=1)
-        top_n = st.number_input("Top N per method", value=10, min_value=1, step=1)
+
+        # One-time startup sync.
+        if sync_on_startup and _require_db_url() and not st.session_state.get("_uwd_startup_synced"):
+            st.session_state["_uwd_startup_synced"] = True
+            with st.spinner("Syncing sample_data into Postgres (startup)..."):
+                if sync_only_latest:
+                    latest_db_date = _latest_session_date_from_db()
+                    rc, out = _run_sample_data_sync(
+                        sample_data_dir=sample_data_dir,
+                        start_date=latest_db_date,
+                        end_date=None,
+                    )
+                else:
+                    rc, out = _run_sample_data_sync(sample_data_dir=sample_data_dir)
+            st.caption("Startup sync log")
+            st.code(_snip_log(out) or "(no output)")
+            if rc != 0:
+                st.error("Startup sync failed. Check log above.")
+                st.stop()
+
+            # Startup recompute (full history by default)
+            dmin, dmax = _session_date_range_from_db()
+            latest_db_date = dmax
+            if recompute_full_history_after_sync and dmin and dmax:
+                with st.spinner(f"Recomputing outlier report for full history ({dmin} → {dmax})..."):
+                    rc2, out2 = _run_outlier_report_for_range(
+                        start=dmin,
+                        end=dmax,
+                        baseline_days=int(baseline_days),
+                        top_n=int(top_n),
+                    )
+                st.caption("Startup recompute log")
+                st.code(_snip_log(out2) or "(no output)")
+                if rc2 != 0:
+                    st.error("Startup recompute failed. Check log above.")
+                    st.stop()
+            elif latest_db_date:
+                with st.spinner(f"Recomputing outlier report for latest date {latest_db_date}..."):
+                    rc2, out2 = _run_outlier_report_for_range(
+                        start=latest_db_date,
+                        end=latest_db_date,
+                        baseline_days=int(baseline_days),
+                        top_n=int(top_n),
+                    )
+                st.caption("Startup recompute log")
+                st.code(_snip_log(out2) or "(no output)")
+                if rc2 != 0:
+                    st.error("Startup recompute failed. Check log above.")
+                    st.stop()
+
+            _load_events_csv.clear()
+            _load_summary_csv.clear()
 
         if source == "CSV outputs":
             events_path = st.text_input("Events CSV", value=default_events)
@@ -341,7 +506,7 @@ def main() -> None:
                         top_n=int(top_n),
                     )
                 st.caption("Latest analysis log")
-                st.code(out or "(no output)")
+                st.code(_snip_log(out) or "(no output)")
                 if rc != 0:
                     st.error("Latest analysis failed. Ensure UW_DATABASE_URL is set and the DB is reachable.")
                     return
