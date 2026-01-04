@@ -174,10 +174,14 @@ def detect_zscore_outliers(
     # Build results
     results = []
     for _, row in outliers_df.head(50).iterrows():  # Limit to top 50
-        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
-        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
-        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
-        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        bid_v = row.get("last_bid")
+        ask_v = row.get("last_ask")
+        last_fill_v = row.get("last_fill")
+        avg_price_v = row.get("avg_price")
+        bid = float(bid_v) if bid_v is not None and pd.notna(bid_v) else None
+        ask = float(ask_v) if ask_v is not None and pd.notna(ask_v) else None
+        last_fill = float(last_fill_v) if last_fill_v is not None and pd.notna(last_fill_v) else None
+        avg_price = float(avg_price_v) if avg_price_v is not None and pd.notna(avg_price_v) else None
         mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),
@@ -266,10 +270,14 @@ def detect_iqr_outliers(
     # Build results
     results = []
     for _, row in outliers_df.head(50).iterrows():
-        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
-        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
-        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
-        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        bid_v = row.get("last_bid")
+        ask_v = row.get("last_ask")
+        last_fill_v = row.get("last_fill")
+        avg_price_v = row.get("avg_price")
+        bid = float(bid_v) if bid_v is not None and pd.notna(bid_v) else None
+        ask = float(ask_v) if ask_v is not None and pd.notna(ask_v) else None
+        last_fill = float(last_fill_v) if last_fill_v is not None and pd.notna(last_fill_v) else None
+        avg_price = float(avg_price_v) if avg_price_v is not None and pd.notna(avg_price_v) else None
         mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),
@@ -378,10 +386,14 @@ def detect_preevent_manipulation(
     # Build results
     results = []
     for _, row in candidates.head(50).iterrows():
-        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
-        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
-        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
-        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        bid_v = row.get("last_bid")
+        ask_v = row.get("last_ask")
+        last_fill_v = row.get("last_fill")
+        avg_price_v = row.get("avg_price")
+        bid = float(bid_v) if bid_v is not None and pd.notna(bid_v) else None
+        ask = float(ask_v) if ask_v is not None and pd.notna(ask_v) else None
+        last_fill = float(last_fill_v) if last_fill_v is not None and pd.notna(last_fill_v) else None
+        avg_price = float(avg_price_v) if avg_price_v is not None and pd.notna(avg_price_v) else None
         mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),

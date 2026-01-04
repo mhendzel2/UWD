@@ -3,7 +3,7 @@
 This script expects sessions + OI_DIFF raw_files already in the DB (e.g. loaded from sample_data).
 
 Outputs:
-- backend/tmp/outlier_events.csv: per-event per-symbol forward returns
+- backend/tmp/outlier_events.csv: per-event per-option forward returns (with underlying forward returns)
 - backend/tmp/outlier_summary.csv: aggregate forward-return stats by method/horizon
 
 Example:
@@ -41,6 +41,10 @@ class OutlierEvent:
     event_date: date
     method: str
     underlying_symbol: str
+    option_symbol: str | None
+    strike: float | None
+    dte: int | None
+    option_mid_0: float | None
     score: float
     oi_diff: float
 
@@ -250,6 +254,10 @@ def main() -> int:
                             event_date=s.date,
                             method=method_name,
                             underlying_symbol=str(r.get("underlying_symbol") or "").strip().upper(),
+                            option_symbol=str(r.get("option_symbol")).strip().upper() if r.get("option_symbol") else None,
+                            strike=float(r["strike"]) if r.get("strike") is not None else None,
+                            dte=int(r["dte"]) if r.get("dte") is not None else None,
+                            option_mid_0=float(r["option_mid"]) if r.get("option_mid") is not None else None,
                             score=float(r.get("score", 0) or 0),
                             oi_diff=float(r.get("oi_diff", 0) or 0),
                         )
@@ -294,7 +302,11 @@ def main() -> int:
             "event_date": ev.event_date.isoformat(),
             "anchor_date": anchor_date.isoformat(),
             "session_id": ev.session_id,
-            "symbol": sym,
+            "underlying_symbol": sym,
+            "option_symbol": ev.option_symbol or "",
+            "strike": ev.strike if ev.strike is not None else "",
+            "dte": ev.dte if ev.dte is not None else "",
+            "option_mid_0": ev.option_mid_0 if ev.option_mid_0 is not None else "",
             "method": ev.method,
             "score": ev.score,
             "oi_diff": ev.oi_diff,

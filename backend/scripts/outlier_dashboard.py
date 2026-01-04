@@ -24,7 +24,8 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date
+import math
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -42,6 +43,7 @@ def _repo_root() -> Path:
 
 
 _FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
+_OCC_RE = re.compile(r"^(?P<underlying>[A-Z]+)(?P<yymmdd>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
 
 
 def _require_db_url() -> str | None:
@@ -264,6 +266,11 @@ def _coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def _load_events_csv(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
+
+    # Backwards/forwards compatibility: normalize key column names.
+    if "underlying_symbol" not in df.columns and "symbol" in df.columns:
+        df = df.rename(columns={"symbol": "underlying_symbol"})
+
     # Normalize types
     for c in ["event_date", "anchor_date"]:
         if c in df.columns:
@@ -284,8 +291,10 @@ def _load_events_csv(path: str) -> pd.DataFrame:
         ],
     )
 
-    if "symbol" in df.columns:
-        df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
+    if "underlying_symbol" in df.columns:
+        df["underlying_symbol"] = df["underlying_symbol"].astype(str).str.upper().str.strip()
+    if "option_symbol" in df.columns:
+        df["option_symbol"] = df["option_symbol"].astype(str).str.upper().str.strip()
     if "method" in df.columns:
         df["method"] = df["method"].astype(str).str.strip()
 
@@ -311,11 +320,113 @@ def _load_events_from_db(table_name: str, schema: str | None = None) -> pd.DataF
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce").dt.date
     df = _coerce_numeric(df, ["score", "oi_diff", "ret_1", "ret_5", "ret_20"])
-    if "symbol" in df.columns:
-        df["symbol"] = df["symbol"].astype(str).str.upper().str.strip()
+    if "underlying_symbol" not in df.columns and "symbol" in df.columns:
+        df = df.rename(columns={"symbol": "underlying_symbol"})
+    if "underlying_symbol" in df.columns:
+        df["underlying_symbol"] = df["underlying_symbol"].astype(str).str.upper().str.strip()
+    if "option_symbol" in df.columns:
+        df["option_symbol"] = df["option_symbol"].astype(str).str.upper().str.strip()
     if "method" in df.columns:
         df["method"] = df["method"].astype(str).str.strip()
     return df
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _bs_price(*, S: float, K: float, T: float, sigma: float, option_type: str, r: float = 0.0) -> float:
+    """Black-Scholes price (European), no dividends.
+
+    Uses math.erf for N(x) to avoid SciPy.
+    """
+    if S <= 0 or K <= 0:
+        return 0.0
+    if T <= 0 or sigma <= 0:
+        if option_type.upper().startswith("C"):
+            return max(S - K, 0.0)
+        return max(K - S, 0.0)
+
+    sqrtT = math.sqrt(T)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+
+    if option_type.upper().startswith("C"):
+        return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+
+def _parse_occ_option_symbol(sym: str) -> tuple[date | None, str | None, float | None]:
+    """Parse OCC-style symbol like IBIT251219P00043000."""
+    m = _OCC_RE.match((sym or "").strip().upper())
+    if not m:
+        return None, None, None
+    yymmdd = m.group("yymmdd")
+    cp = m.group("cp")
+    strike_raw = m.group("strike")
+
+    try:
+        exp = datetime.strptime(yymmdd, "%y%m%d").date()
+    except Exception:
+        exp = None
+
+    opt_type = "CALL" if cp == "C" else "PUT"
+    try:
+        strike = int(strike_raw) / 1000.0
+    except Exception:
+        strike = None
+    return exp, opt_type, strike
+
+
+def _stooq_candidates(sym: str) -> list[str]:
+    s = (sym or "").strip().upper()
+    if not s or s == "N/A":
+        return []
+    index_map = {"SPX": "^spx", "SPXW": "^spx", "NDX": "^ndx", "RUT": "^rut", "VIX": "^vix"}
+    if s in index_map:
+        return [index_map[s]]
+    base = s.lower()
+    return [f"{base}.us", base]
+
+
+@st.cache_data(show_spinner=False)
+def _load_cached_price_df(symbol: str) -> pd.DataFrame | None:
+    root = _repo_backend_root()
+    cache_dir = root / ".cache" / "prices"
+    for candidate in _stooq_candidates(symbol):
+        safe = candidate.replace("/", "_").replace("\\", "_")
+        cache_path = cache_dir / f"{safe}.csv"
+        if not cache_path.exists():
+            continue
+        try:
+            df = pd.read_csv(cache_path)
+            df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+            df = df.dropna(subset=["date"]).sort_values("date")
+            return df
+        except Exception:
+            continue
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def _realized_vol_annual(symbol: str, asof: date, lookback_trading_days: int = 20) -> float | None:
+    df = _load_cached_price_df(symbol)
+    if df is None or df.empty or "date" not in df.columns or "close" not in df.columns:
+        return None
+    df2 = df[df["date"] <= asof]
+    if df2.empty:
+        return None
+    closes = pd.to_numeric(df2["close"], errors="coerce").dropna().astype(float).values
+    if closes.size < lookback_trading_days + 1:
+        return None
+    closes = closes[-(lookback_trading_days + 1) :]
+    rets = (pd.Series(closes).pct_change()).dropna().astype(float).values
+    if rets.size < 2:
+        return None
+    vol_daily = float(pd.Series(rets).std(ddof=0))
+    vol_annual = vol_daily * math.sqrt(252.0)
+    # Clamp to keep BS stable.
+    return float(max(0.05, min(2.0, vol_annual)))
 
 
 @st.cache_data(show_spinner=False)
@@ -608,7 +719,7 @@ def main() -> None:
 
         st.header("Filters")
         methods = sorted([m for m in df.get("method", pd.Series([], dtype=str)).dropna().unique()])
-        symbols = sorted([s for s in df.get("symbol", pd.Series([], dtype=str)).dropna().unique()])
+        symbols = sorted([s for s in df.get("underlying_symbol", pd.Series([], dtype=str)).dropna().unique()])
 
         default_methods = methods
         sel_methods = st.multiselect("Method", methods, default=default_methods)
@@ -641,8 +752,12 @@ def main() -> None:
         f = f[f["method"].isin(sel_methods)]
 
     if symbol_query.strip() and "symbol" in f.columns:
+        # Back-compat: older CSVs used 'symbol'
         q = symbol_query.strip().upper()
         f = f[f["symbol"].astype(str).str.contains(q, na=False)]
+    elif symbol_query.strip() and "underlying_symbol" in f.columns:
+        q = symbol_query.strip().upper()
+        f = f[f["underlying_symbol"].astype(str).str.contains(q, na=False)]
 
     if start_d and end_d and "event_date" in f.columns:
         f = f[(f["event_date"] >= start_d) & (f["event_date"] <= end_d)]
@@ -659,7 +774,7 @@ def main() -> None:
     # KPIs
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Rows", f.shape[0])
-    c2.metric("Unique symbols", int(f["symbol"].nunique()) if "symbol" in f.columns else 0)
+    c2.metric("Unique symbols", int(f["underlying_symbol"].nunique()) if "underlying_symbol" in f.columns else (int(f["symbol"].nunique()) if "symbol" in f.columns else 0))
     c3.metric("Methods", int(f["method"].nunique()) if "method" in f.columns else 0)
     if "event_date" in f.columns and f["event_date"].notna().any():
         c4.metric("Date span", f"{f['event_date'].min()} → {f['event_date'].max()}")
@@ -675,7 +790,7 @@ def main() -> None:
             y_default = ret_col if ret_col in numeric_candidates else numeric_candidates[0]
             y_col = st.selectbox("Y", options=numeric_candidates, index=numeric_candidates.index(y_default))
 
-            color_options = ["method", "symbol"] + numeric_candidates
+            color_options = ["method", "underlying_symbol", "option_symbol"] + numeric_candidates
             color_options = [c for c in color_options if c in f.columns]
             color_col = st.selectbox("Color", options=color_options, index=0)
 
@@ -698,7 +813,19 @@ def main() -> None:
                 y=y_col,
                 color=color_col if color_col else None,
                 size=size_col,
-                hover_data=[c for c in ["symbol", "method", "event_date", "session_id", "oi_diff", "score"] if c in plot_df.columns],
+                hover_data=[
+                    c
+                    for c in [
+                        "underlying_symbol",
+                        "option_symbol",
+                        "method",
+                        "event_date",
+                        "session_id",
+                        "oi_diff",
+                        "score",
+                    ]
+                    if c in plot_df.columns
+                ],
                 opacity=0.75,
             )
             st.plotly_chart(fig2d, use_container_width=True)
@@ -742,6 +869,332 @@ def main() -> None:
                 st.plotly_chart(fig_box, use_container_width=True)
 
     with right:
+        st.subheader("Daily top 5 picks")
+        st.caption(
+            "Option P/L uses actual entry option mid when available; otherwise Black-Scholes. "
+            "For P/L tracking, non-0DTE options are exited at least 2 days before expiry."
+        )
+
+        picks_per_day = 5
+        dedupe_underlying = st.checkbox("One pick per underlying", value=True)
+
+        def _compute_pick_row(row: pd.Series) -> dict[str, Any]:
+            def _to_float(v: Any) -> float | None:
+                try:
+                    if v is None:
+                        return None
+                    if isinstance(v, str) and not v.strip():
+                        return None
+                    return float(v)
+                except Exception:
+                    return None
+
+            def _to_date(v: Any) -> date | None:
+                if v is None:
+                    return None
+                # pandas uses NaT/NaN for missing
+                try:
+                    if pd.isna(v):
+                        return None
+                except Exception:
+                    pass
+
+                if isinstance(v, str):
+                    s = v.strip()
+                    if not s:
+                        return None
+                    try:
+                        return datetime.strptime(s, "%Y-%m-%d").date()
+                    except Exception:
+                        return None
+
+                # datetime is a subclass of date; coerce to date.
+                if isinstance(v, datetime):
+                    return v.date()
+                if isinstance(v, date):
+                    return v
+
+                # pandas Timestamp or similar objects with .to_pydatetime()
+                to_py = getattr(v, "to_pydatetime", None)
+                if callable(to_py):
+                    try:
+                        py = to_py()
+                        if isinstance(py, datetime):
+                            return py.date()
+                    except Exception:
+                        return None
+                return None
+
+            underlying = str(row.get("underlying_symbol") or row.get("symbol") or "").strip().upper()
+            option_symbol = str(row.get("option_symbol") or "").strip().upper() or None
+
+            entry_date = _to_date(row.get("anchor_date")) or _to_date(row.get("event_date"))
+            exit_date_raw = row.get(f"date_{picks_horizon}")
+            exit_date = _to_date(exit_date_raw)
+
+            close0 = _to_float(row.get("close_0"))
+            close_h = None
+
+            exp, opt_type, occ_strike = _parse_occ_option_symbol(option_symbol or "")
+            if opt_type is None:
+                # Fallback: infer direction from score sign.
+                score = float(row.get("score")) if pd.notna(row.get("score")) else 0.0
+                opt_type = "CALL" if score >= 0 else "PUT"
+            strike = None
+            if pd.notna(row.get("strike")):
+                try:
+                    strike = float(row.get("strike"))
+                except Exception:
+                    strike = None
+            if strike is None:
+                strike = occ_strike
+            if strike is None and close0 is not None:
+                strike = float(round(close0))
+
+            if exp is None and entry_date:
+                exp = entry_date + timedelta(days=30)
+
+            sigma = None
+            if entry_date:
+                sigma = _realized_vol_annual(underlying, entry_date)
+            sigma = sigma if sigma is not None else 0.5
+
+            entry_mid = _to_float(row.get("option_mid_0"))
+
+            theo_entry = None
+            theo_exit = None
+
+            if isinstance(exp, datetime):
+                exp = exp.date()
+
+            if close0 is not None and strike is not None and entry_date and exp:
+                T0 = max((exp - entry_date).days / 365.0, 0.0)
+                theo_entry = _bs_price(S=close0, K=float(strike), T=T0, sigma=float(sigma), option_type=opt_type)
+
+            entry_px = entry_mid if (entry_mid is not None and entry_mid > 0) else theo_entry
+            exit_px = theo_exit
+
+            pnl = None
+            ret_pct = None
+            if entry_px is not None and exit_px is not None and entry_px > 0:
+                pnl = (exit_px - entry_px) * 100.0
+                ret_pct = (exit_px / entry_px) - 1.0
+
+            return {
+                "event_date": row.get("event_date"),
+                "underlying": underlying,
+                "option_symbol": option_symbol or "",
+                "type": opt_type,
+                "strike": strike or "",
+                "exp": exp.isoformat() if exp else "",
+                "method": row.get("method"),
+                "score": row.get("score"),
+                "oi_diff": row.get("oi_diff"),
+                "entry_underlying": close0,
+                "exit_underlying": close_h,
+                "entry_mid_actual": entry_mid,
+                "entry_mid_used": entry_px,
+                "exit_mid_theo": exit_px,
+                "pnl_$": pnl,
+                "ret_%": (ret_pct * 100.0) if ret_pct is not None else None,
+                "sigma": sigma,
+            }
+
+        def _top_picks_for_day(d: date) -> pd.DataFrame:
+            day_df = df[df["event_date"] == d].copy()
+            if day_df.empty:
+                return day_df
+            day_df["_rank"] = pd.to_numeric(day_df.get("score"), errors="coerce").abs().fillna(0.0)
+            day_df = day_df.sort_values("_rank", ascending=False)
+            if dedupe_underlying:
+                key_col = "underlying_symbol" if "underlying_symbol" in day_df.columns else "symbol"
+                if key_col in day_df.columns:
+                    day_df = day_df.drop_duplicates(subset=[key_col], keep="first")
+            return day_df.head(picks_per_day)
+
+        if "event_date" not in df.columns or not df["event_date"].notna().any():
+            st.info("No event_date column found in data.")
+        else:
+            # Section 1: latest day table
+            latest_day = max(df["event_date"].dropna())
+            st.markdown(f"**Latest day picks ({latest_day})**")
+            latest_picks_df = _top_picks_for_day(latest_day)
+            latest_rows = [_compute_pick_row(r) for _, r in latest_picks_df.iterrows()]
+            latest_out = pd.DataFrame(latest_rows)
+            if latest_out.empty:
+                st.info("No picks available for latest day.")
+            else:
+                st.dataframe(
+                    latest_out[[
+                        c
+                        for c in [
+                            "underlying",
+                            "option_symbol",
+                            "type",
+                            "strike",
+                            "exp",
+                            "method",
+                            "score",
+                            "oi_diff",
+                            "entry_mid_used",
+                            "sigma",
+                        ]
+                        if c in latest_out.columns
+                    ]],
+                    use_container_width=True,
+                    height=220,
+                )
+
+            # Section 2: P/L path for all picks
+            st.markdown("**P/L vs days post acquisition (all daily top 5 picks)**")
+            pl_metric = st.selectbox("P/L metric", ["Return %", "P/L $ per contract"], index=0)
+
+            all_series_rows: list[dict[str, Any]] = []
+            all_picks_rows: list[pd.Series] = []
+            for d in sorted(df["event_date"].dropna().unique()):
+                all_picks_rows.extend([r for _, r in _top_picks_for_day(d).iterrows()])
+
+            for r in all_picks_rows:
+                underlying = str(r.get("underlying_symbol") or r.get("symbol") or "").strip().upper()
+                entry_date = r.get("anchor_date") or r.get("event_date")
+                try:
+                    if pd.isna(entry_date):
+                        continue
+                except Exception:
+                    pass
+                if isinstance(entry_date, str):
+                    try:
+                        entry_date = datetime.strptime(entry_date, "%Y-%m-%d").date()
+                    except Exception:
+                        continue
+                elif isinstance(entry_date, datetime):
+                    entry_date = entry_date.date()
+                elif isinstance(entry_date, date):
+                    entry_date = entry_date
+                else:
+                    # pandas Timestamp
+                    to_py = getattr(entry_date, "to_pydatetime", None)
+                    if callable(to_py):
+                        try:
+                            entry_date = to_py().date()
+                        except Exception:
+                            continue
+                    else:
+                        continue
+
+                option_symbol = str(r.get("option_symbol") or "").strip().upper()
+                exp, opt_type, occ_strike = _parse_occ_option_symbol(option_symbol)
+                if opt_type is None:
+                    score = float(r.get("score")) if pd.notna(r.get("score")) else 0.0
+                    opt_type = "CALL" if score >= 0 else "PUT"
+
+                strike = None
+                if pd.notna(r.get("strike")):
+                    try:
+                        strike = float(r.get("strike"))
+                    except Exception:
+                        strike = None
+                if strike is None:
+                    strike = occ_strike
+
+                close0 = r.get("close_0")
+                try:
+                    close0 = float(close0) if close0 is not None and not (isinstance(close0, str) and not close0.strip()) else None
+                except Exception:
+                    close0 = None
+                if close0 is None:
+                    continue
+
+                if exp is None:
+                    exp = entry_date + timedelta(days=30)
+
+                # Exit rule: if not 0DTE, exit at least 2 days prior to expiry.
+                is_0dte = (exp == entry_date)
+                last_allowed_exit = exp if is_0dte else (exp - timedelta(days=2))
+                if last_allowed_exit < entry_date:
+                    last_allowed_exit = entry_date
+
+                sigma = _realized_vol_annual(underlying, entry_date) or 0.5
+                entry_mid = None
+                try:
+                    v = r.get("option_mid_0")
+                    if v is not None and not (isinstance(v, str) and not v.strip()) and pd.notna(v):
+                        entry_mid = float(v)
+                except Exception:
+                    entry_mid = None
+
+                T0 = max((exp - entry_date).days / 365.0, 0.0)
+                theo_entry = _bs_price(S=close0, K=float(strike or round(close0)), T=T0, sigma=float(sigma), option_type=opt_type)
+                entry_px = entry_mid if (entry_mid is not None and entry_mid > 0) else theo_entry
+                if entry_px is None or entry_px <= 0:
+                    continue
+
+                price_df = _load_cached_price_df(underlying)
+                if price_df is None or price_df.empty:
+                    continue
+                # Align to trading calendar: use the first trading day >= entry_date
+                price_df = price_df.sort_values("date")
+                mask = price_df["date"] >= entry_date
+                if not mask.any():
+                    continue
+                anchor_idx = int(price_df.index[mask][0])
+                anchor_trade_date = price_df.loc[price_df.index[mask][0], "date"]
+                # If anchor_trade_date is after last_allowed_exit, we can only do day 0
+                max_idx = anchor_idx
+                # Find last trading day <= last_allowed_exit
+                mask_exit = price_df["date"] <= last_allowed_exit
+                if mask_exit.any():
+                    max_idx = int(price_df.index[mask_exit][-1])
+
+                max_offset = max_idx - anchor_idx
+                if max_offset < 0:
+                    max_offset = 0
+
+                for off in range(0, max_offset + 1):
+                    idx = anchor_idx + off
+                    if idx not in price_df.index:
+                        continue
+                    trade_date = price_df.loc[idx, "date"]
+                    try:
+                        S_t = float(price_df.loc[idx, "close"])
+                    except Exception:
+                        continue
+                    Tt = max((exp - trade_date).days / 365.0, 0.0)
+                    theo_t = _bs_price(S=S_t, K=float(strike or round(close0)), T=Tt, sigma=float(sigma), option_type=opt_type)
+                    pnl = (theo_t - entry_px) * 100.0
+                    ret_pct = (theo_t / entry_px) - 1.0 if entry_px else None
+                    all_series_rows.append(
+                        {
+                            "days_post": off,
+                            "event_date": r.get("event_date"),
+                            "underlying": underlying,
+                            "option_symbol": option_symbol,
+                            "trade_date": trade_date,
+                            "pnl_$": pnl,
+                            "ret_%": (ret_pct * 100.0) if ret_pct is not None else None,
+                        }
+                    )
+
+            series_df = pd.DataFrame(all_series_rows)
+            if series_df.empty:
+                st.info("No P/L paths available (missing cached prices or option fields).")
+            else:
+                ycol = "ret_%" if pl_metric == "Return %" else "pnl_$"
+                agg = (
+                    series_df.groupby("days_post")[ycol]
+                    .agg(["count", "mean", "median", lambda s: s.quantile(0.25), lambda s: s.quantile(0.75)])
+                    .reset_index()
+                )
+                agg = agg.rename(columns={"<lambda_0>": "p25", "<lambda_1>": "p75"})
+                fig = px.line(agg, x="days_post", y="median", markers=True)
+                fig.update_layout(
+                    xaxis_title="Trading days post acquisition",
+                    yaxis_title=("Return %" if ycol == "ret_%" else "P/L $ per contract"),
+                    margin=dict(l=0, r=0, t=10, b=0),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("Aggregate across all daily top 5 picks: median with sample counts.")
+
         st.subheader("Top movers")
         if ret_col in f.columns and f[ret_col].notna().any():
             top_pos = f.sort_values(ret_col, ascending=False).head(20)
@@ -749,14 +1202,14 @@ def main() -> None:
 
             st.caption(f"Top +{horizon}d returns")
             st.dataframe(
-                top_pos[[c for c in ["event_date", "symbol", "method", "score", "oi_diff", ret_col] if c in top_pos.columns]],
+                top_pos[[c for c in ["event_date", "underlying_symbol", "option_symbol", "method", "score", "oi_diff", ret_col] if c in top_pos.columns]],
                 use_container_width=True,
                 height=280,
             )
 
             st.caption(f"Top -{horizon}d returns")
             st.dataframe(
-                top_neg[[c for c in ["event_date", "symbol", "method", "score", "oi_diff", ret_col] if c in top_neg.columns]],
+                top_neg[[c for c in ["event_date", "underlying_symbol", "option_symbol", "method", "score", "oi_diff", ret_col] if c in top_neg.columns]],
                 use_container_width=True,
                 height=280,
             )
