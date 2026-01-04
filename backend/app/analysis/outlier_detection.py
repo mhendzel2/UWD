@@ -22,6 +22,11 @@ class OutlierResult:
     oi_diff: float
     strike: Optional[float]
     stock_price: Optional[float]
+    option_bid: Optional[float]
+    option_ask: Optional[float]
+    option_mid: Optional[float]
+    option_last_fill: Optional[float]
+    option_avg_price: Optional[float]
     percentage_of_total: Optional[float]
     days_to_earnings: Optional[int]
     dte: Optional[int]
@@ -169,12 +174,22 @@ def detect_zscore_outliers(
     # Build results
     results = []
     for _, row in outliers_df.head(50).iterrows():  # Limit to top 50
+        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
+        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
+        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
+        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),
             option_symbol=str(row.get('option_symbol', 'N/A')),
             oi_diff=float(row.get(column, 0)),
             strike=float(row['strike']) if pd.notna(row.get('strike')) else None,
             stock_price=float(row['stock_price']) if pd.notna(row.get('stock_price')) else None,
+            option_bid=bid,
+            option_ask=ask,
+            option_mid=mid,
+            option_last_fill=last_fill,
+            option_avg_price=avg_price,
             percentage_of_total=float(row['percentage_of_total']) if pd.notna(row.get('percentage_of_total')) else None,
             days_to_earnings=int(row['days_to_earnings']) if pd.notna(row.get('days_to_earnings')) else None,
             dte=int(row['dte']) if pd.notna(row.get('dte')) else None,
@@ -251,12 +266,22 @@ def detect_iqr_outliers(
     # Build results
     results = []
     for _, row in outliers_df.head(50).iterrows():
+        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
+        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
+        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
+        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),
             option_symbol=str(row.get('option_symbol', 'N/A')),
             oi_diff=float(row.get(column, 0)),
             strike=float(row['strike']) if pd.notna(row.get('strike')) else None,
             stock_price=float(row['stock_price']) if pd.notna(row.get('stock_price')) else None,
+            option_bid=bid,
+            option_ask=ask,
+            option_mid=mid,
+            option_last_fill=last_fill,
+            option_avg_price=avg_price,
             percentage_of_total=float(row['percentage_of_total']) if pd.notna(row.get('percentage_of_total')) else None,
             days_to_earnings=int(row['days_to_earnings']) if pd.notna(row.get('days_to_earnings')) else None,
             dte=int(row['dte']) if pd.notna(row.get('dte')) else None,
@@ -353,12 +378,22 @@ def detect_preevent_manipulation(
     # Build results
     results = []
     for _, row in candidates.head(50).iterrows():
+        bid = float(row.get("last_bid")) if pd.notna(row.get("last_bid")) else None
+        ask = float(row.get("last_ask")) if pd.notna(row.get("last_ask")) else None
+        last_fill = float(row.get("last_fill")) if pd.notna(row.get("last_fill")) else None
+        avg_price = float(row.get("avg_price")) if pd.notna(row.get("avg_price")) else None
+        mid = (bid + ask) / 2.0 if (bid is not None and ask is not None) else None
         results.append(OutlierResult(
             underlying_symbol=str(row.get('underlying_symbol', 'N/A')),
             option_symbol=str(row.get('option_symbol', 'N/A')),
             oi_diff=float(row.get(column, 0)),
             strike=float(row['strike']) if pd.notna(row.get('strike')) else None,
             stock_price=float(row['stock_price']) if pd.notna(row.get('stock_price')) else None,
+            option_bid=bid,
+            option_ask=ask,
+            option_mid=mid,
+            option_last_fill=last_fill,
+            option_avg_price=avg_price,
             percentage_of_total=float(row['percentage_of_total']) if pd.notna(row.get('percentage_of_total')) else None,
             days_to_earnings=int(row['days_to_earnings']) if pd.notna(row.get('days_to_earnings')) else None,
             dte=int(row['dte']) if pd.notna(row.get('dte')) else None,
