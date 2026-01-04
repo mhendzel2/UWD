@@ -47,6 +47,10 @@ class OutlierEvent:
     option_mid_0: float | None
     score: float
     oi_diff: float
+    # Flow sentiment fields
+    flow_sentiment: float | None = None
+    flow_total_premium: float | None = None
+    flow_adjusted_score: float | None = None
 
 
 def _iter_oi_rows(db, session_id: str, *, max_rows: int | None = None) -> list[dict[str, Any]]:
@@ -71,6 +75,39 @@ def _iter_oi_rows(db, session_id: str, *, max_rows: int | None = None) -> list[d
             if max_rows is not None and len(rows) >= max_rows:
                 return rows
     return rows
+
+
+def _get_flow_metrics_for_session(db, session_id: str) -> dict[str, dict[str, Any]]:
+    """Retrieve flow metrics from BOT_EOD or OPTIONS_FLOW RawFile for a session.
+    
+    Returns: dict of {underlying: {sentiment_score, total_premium, ...}}
+    """
+    for source in (models.RawSource.OPTIONS_FLOW, models.RawSource.BOT_EOD):
+        q = (
+            db.query(models.RawFile)
+            .options(load_only(models.RawFile.extras))
+            .filter(
+                models.RawFile.session_id == session_id,
+                models.RawFile.source == source,
+                models.RawFile.parse_status == models.ParseStatus.OK,
+            )
+            .order_by(models.RawFile.imported_at.desc())
+        )
+        rf = q.first()
+        if not rf or not rf.extras:
+            continue
+        
+        # Prefer pre-aggregated metrics
+        if isinstance(rf.extras, dict) and isinstance(rf.extras.get("agg"), dict):
+            return rf.extras["agg"]
+        
+        # Fall back to aggregating raw rows if available
+        rows = rf.extras.get("rows") if isinstance(rf.extras, dict) else None
+        if isinstance(rows, list) and rows:
+            from app.ingest import bot_eod
+            return bot_eod.aggregate(rows)
+    
+    return {}
 
 
 def _iter_baseline_rows(db, session_date: date, baseline_days: int, *, max_rows: int | None = None) -> list[dict[str, Any]]:
@@ -235,18 +272,26 @@ def main() -> int:
 
             oi_rows = _iter_oi_rows(db, sid, max_rows=args.max_rows)
             baseline_rows = _iter_baseline_rows(db, s.date, args.baseline_days, max_rows=args.max_rows)
+            flow_metrics = _get_flow_metrics_for_session(db, sid)
 
-            print(f"Outliers {s.date} (rows={len(oi_rows)} baseline_rows={len(baseline_rows)})", flush=True)
+            flow_info = f" flow_underlyings={len(flow_metrics)}" if flow_metrics else ""
+            print(f"Outliers {s.date} (rows={len(oi_rows)} baseline_rows={len(baseline_rows)}{flow_info})", flush=True)
             res = analyze_from_session_data(
                 oi_rows,
                 baseline_oi_data=baseline_rows if baseline_rows else None,
+                flow_metrics=flow_metrics if flow_metrics else None,
             )
 
             for key, method_name in (("zscore", "Z-Score"), ("iqr", "IQR"), ("preevent", "Pre-Event")):
                 block = res.get(key, {})
                 rlist = block.get("results", [])
-                # Sort by score desc (already mostly), then take top-n
-                rlist = sorted(rlist, key=lambda r: float(r.get("score", 0) or 0), reverse=True)[: args.top_n]
+                # Sort by flow_adjusted_score if available, else score
+                def _sort_key(r):
+                    adj = r.get("flow_adjusted_score")
+                    if adj is not None:
+                        return float(adj)
+                    return float(r.get("score", 0) or 0)
+                rlist = sorted(rlist, key=_sort_key, reverse=True)[: args.top_n]
                 for r in rlist:
                     events.append(
                         OutlierEvent(
@@ -260,6 +305,9 @@ def main() -> int:
                             option_mid_0=float(r["option_mid"]) if r.get("option_mid") is not None else None,
                             score=float(r.get("score", 0) or 0),
                             oi_diff=float(r.get("oi_diff", 0) or 0),
+                            flow_sentiment=float(r["flow_sentiment"]) if r.get("flow_sentiment") is not None else None,
+                            flow_total_premium=float(r["flow_total_premium"]) if r.get("flow_total_premium") is not None else None,
+                            flow_adjusted_score=float(r["flow_adjusted_score"]) if r.get("flow_adjusted_score") is not None else None,
                         )
                     )
 
@@ -311,6 +359,10 @@ def main() -> int:
             "score": ev.score,
             "oi_diff": ev.oi_diff,
             "close_0": close0,
+            # Flow sentiment fields
+            "flow_sentiment": ev.flow_sentiment if ev.flow_sentiment is not None else "",
+            "flow_total_premium": ev.flow_total_premium if ev.flow_total_premium is not None else "",
+            "flow_adjusted_score": ev.flow_adjusted_score if ev.flow_adjusted_score is not None else "",
         }
 
         for h in horizons:

@@ -697,8 +697,20 @@ def analyze_from_session_data(
     earnings_days: int = 14,
     chain_pct: float = 0.20,
     baseline_oi_data: Optional[List[Dict[str, Any]]] = None,
+    flow_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Analyze outliers from session data (already loaded in DB)"""
+    """Analyze outliers from session data (already loaded in DB)
+    
+    Args:
+        oi_data: List of OI change rows
+        zscore_threshold: Z-score threshold for outlier detection
+        iqr_multiplier: IQR multiplier for outlier detection
+        earnings_days: Days to earnings threshold
+        chain_pct: Chain percentage threshold
+        baseline_oi_data: Optional baseline data for z-score/IQR calculation
+        flow_metrics: Optional dict of {underlying: {sentiment_score, total_premium, ...}}
+                      for flow-adjusted scoring
+    """
     
     if not oi_data:
         return {'error': 'No OI data provided'}
@@ -755,4 +767,5 @@ def analyze_from_session_data(
         earnings_days=earnings_days,
         chain_pct=chain_pct,
         baseline_df=baseline_df,
+        flow_metrics=flow_metrics,
     )
