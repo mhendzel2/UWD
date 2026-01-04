@@ -17,7 +17,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    raw_source_enum = sa.Enum(
+    # Use existing raw_source enum from the database (do not create)
+    raw_source_enum = postgresql.ENUM(
         "OI_DIFF",
         "BOT_EOD",
         "HOT_CHAINS",

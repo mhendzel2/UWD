@@ -1,7 +1,7 @@
 """Add outlier outcomes and method stats tables for feedback loop.
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0006_outlier_outcomes
+Revises: 0005_add_options_flow_source
 Create Date: 2026-01-04
 
 """
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "0006"
-down_revision = "0005"
+revision = "0006_outlier_outcomes"
+down_revision = "0005_add_options_flow_source"
 branch_labels = None
 depends_on = None
 
