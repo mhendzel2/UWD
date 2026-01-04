@@ -49,7 +49,7 @@ _PREFIX_TO_SOURCE: dict[str, models.RawSource] = {
 _FILE_RE = re.compile(r"^(?P<prefix>chain-oi-changes|bot-eod-report|dp-eod-report|hot-chains|stock-screener)-(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
 
 
-def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, path: Path) -> bool:
+def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, path: Path) -> tuple[bool, str | None]:
     # BOT_EOD files can be extremely large; avoid full-file hashing where possible.
     file_size = int(path.stat().st_size)
     if source == models.RawSource.BOT_EOD and file_size > 50 * 1024 * 1024:
@@ -70,7 +70,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
         .first()
     )
     if existing_id:
-        return False
+        return False, str(existing_id[0])
 
     rows_count = 0
 
@@ -109,7 +109,7 @@ def _import_csv_for_session(*, db, session_id: str, source: models.RawSource, pa
             context={"source": source.value, "rows": rows_count},
         )
     )
-    return True
+    return True, None
 
 
 def main() -> int:
@@ -207,12 +207,19 @@ def main() -> int:
             for source, path in files:
                 print(f"  importing {source.value}: {path.name} ...", flush=True)
                 try:
-                    did = _import_csv_for_session(db=db, session_id=session_id, source=source, path=path)
+                    did, existing_file_id = _import_csv_for_session(
+                        db=db,
+                        session_id=session_id,
+                        source=source,
+                        path=path,
+                    )
                     if did:
                         db.commit()
                         imported_here += 1
                     else:
                         skipped_here += 1
+                        if existing_file_id:
+                            print(f"    skipped: already imported (file_id={existing_file_id})", flush=True)
                 except KeyboardInterrupt:
                     db.rollback()
                     raise
