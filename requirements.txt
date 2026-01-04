@@ -1,0 +1,4 @@
+# Python dependencies for UWD
+#
+# Installs the backend in editable mode + optional visualization deps (Streamlit/Plotly)
+-e ./backend[viz]
