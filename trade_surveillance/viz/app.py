@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 
@@ -97,4 +98,46 @@ def run(*, scores_path: str) -> None:
         ]
         view = filtered[preferred]
 
-    st.dataframe(view.head(int(max_rows)), use_container_width=True)
+    st.subheader("Plots")
+    # Minimal plotting to help interpret the outputs.
+    # Keep plots driven by existing filter (min_pct) only.
+    try:
+        plot_df = filtered.copy()
+        if "timestamp" in plot_df.columns:
+            plot_df = plot_df.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            fig = px.histogram(plot_df, x="ensemble_pct", nbins=50, title="Ensemble percentile distribution")
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            if "symbol" in plot_df.columns:
+                counts = plot_df["symbol"].value_counts().reset_index()
+                counts.columns = ["symbol", "count"]
+                fig = px.bar(counts, x="symbol", y="count", title="High-stringency counts by symbol")
+                st.plotly_chart(fig, use_container_width=True)
+
+        c3, c4 = st.columns(2)
+        with c3:
+            if "timestamp" in plot_df.columns:
+                fig = px.line(plot_df, x="timestamp", y="ensemble_pct", color="symbol" if "symbol" in plot_df.columns else None,
+                              title="Ensemble percentile over time")
+                st.plotly_chart(fig, use_container_width=True)
+        with c4:
+            # Prefer qty vs score; fall back gracefully.
+            x = "qty" if "qty" in plot_df.columns else None
+            if x is not None:
+                fig = px.scatter(
+                    plot_df,
+                    x=x,
+                    y="ensemble_pct",
+                    color="symbol" if "symbol" in plot_df.columns else None,
+                    hover_data=[c for c in ["reason", "venue", "side"] if c in plot_df.columns],
+                    title="Size vs ensemble percentile",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Plot rendering failed: {e}")
+
+    st.subheader("Rows")
+    st.dataframe(view.head(int(max_rows)), width="stretch")

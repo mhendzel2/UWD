@@ -28,6 +28,25 @@ def _build_parser() -> argparse.ArgumentParser:
     a = sub.add_parser("run-app", help="Launch dashboard pointing to scores.parquet")
     a.add_argument("--scores", required=True)
 
+    perf = sub.add_parser("analyze-performance", help="Top-K per day + price action windows + forward returns")
+    perf.add_argument("--scores", required=True, help="Path to scores.parquet")
+    perf.add_argument(
+        "--prices-dir",
+        default=None,
+        help="Directory containing daily OHLCV CSVs like aapl.us.csv (defaults to backend/.cache/prices)",
+    )
+    perf.add_argument("--out-dir", required=True, help="Output directory")
+    perf.add_argument("--top-k", type=int, default=5)
+    perf.add_argument("--lookback-days", type=int, default=5)
+    perf.add_argument("--forward-days", type=int, default=10)
+    perf.add_argument("--tz", default="America/New_York", help="Timezone for session_date bucketing")
+    perf.add_argument("--option-type", default="CALL", choices=["CALL", "PUT"])
+    perf.add_argument("--option-dte", type=int, default=30, help="Days-to-expiration at entry (trading-day approx)")
+    perf.add_argument("--option-iv", type=float, default=0.50, help="Assumed IV (sigma) for fair value")
+    perf.add_argument("--option-rate", type=float, default=0.04, help="Risk-free rate (continuous comp)")
+    perf.add_argument("--option-div-yield", type=float, default=0.0, help="Dividend yield (continuous comp)")
+    perf.add_argument("--option-strike-round", type=float, default=1.0, help="Round ATM strike to nearest increment")
+
     return p
 
 
@@ -71,5 +90,25 @@ def main(argv: list[str] | None = None) -> int:
             str(args.scores),
         ]
         return int(subprocess.call(cmd))
+
+    if args.cmd == "analyze-performance":
+        from trade_surveillance.performance import analyze_top_signals_vs_price
+
+        analyze_top_signals_vs_price(
+            scores_path=str(args.scores),
+            prices_dir=None if args.prices_dir in {None, ""} else str(args.prices_dir),
+            out_dir=str(args.out_dir),
+            top_k=int(args.top_k),
+            lookback_days=int(args.lookback_days),
+            forward_days=int(args.forward_days),
+            tz=str(args.tz),
+            option_type=str(args.option_type),
+            option_dte=int(args.option_dte),
+            option_iv=float(args.option_iv),
+            option_rate=float(args.option_rate),
+            option_dividend_yield=float(args.option_div_yield),
+            option_strike_round=float(args.option_strike_round),
+        )
+        return 0
 
     raise AssertionError(f"Unhandled cmd: {args.cmd}")
