@@ -1,6 +1,6 @@
 import React from "react";
 import StatusBadge from "./StatusBadge";
-import { tokens } from "../../theme";
+import "./SectionHeader.css";
 
 type SectionHeaderProps = {
   title: string;
@@ -13,23 +13,13 @@ type SectionHeaderProps = {
 
 const SectionHeader: React.FC<SectionHeaderProps> = ({ title, eyebrow, statusLabel, statusTone, actions, updatedAt }) => {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        gap: tokens.spacing.md,
-        flexWrap: "wrap",
-      }}
-    >
-      <div>
-        {eyebrow && <div style={{ color: tokens.colors.muted, fontSize: 12, textTransform: "uppercase" }}>{eyebrow}</div>}
-        <h3 style={{ margin: "4px 0", color: tokens.colors.heading }}>{title}</h3>
-        {updatedAt && (
-          <div style={{ color: tokens.colors.muted, fontSize: 12 }}>Updated {new Date(updatedAt).toLocaleTimeString()}</div>
-        )}
+    <div className="sectionHeader">
+      <div className="sectionHeaderContent">
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        <h3 className="title">{title}</h3>
+        {updatedAt && <div className="timestamp">Updated {new Date(updatedAt).toLocaleTimeString()}</div>}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: tokens.spacing.sm }}>
+      <div className="sectionHeaderActions">
         {statusLabel && <StatusBadge tone={statusTone} label={statusLabel} subdued />}
         {actions}
       </div>

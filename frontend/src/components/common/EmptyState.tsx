@@ -1,5 +1,5 @@
 import React from "react";
-import { tokens } from "../../theme";
+import "./EmptyState.css";
 
 type EmptyStateProps = {
   title: string;
@@ -8,18 +8,10 @@ type EmptyStateProps = {
 };
 
 const EmptyState: React.FC<EmptyStateProps> = ({ title, description, action }) => (
-  <div
-    style={{
-      border: `1px dashed ${tokens.colors.border}`,
-      borderRadius: tokens.radii.md,
-      padding: tokens.spacing.lg,
-      color: tokens.colors.muted,
-      textAlign: "center",
-    }}
-  >
-    <h4 style={{ margin: 0, color: tokens.colors.heading }}>{title}</h4>
-    {description && <p style={{ marginTop: 4 }}>{description}</p>}
-    {action && <div style={{ marginTop: tokens.spacing.sm }}>{action}</div>}
+  <div className="emptyState">
+    <h4 className="emptyStateTitle">{title}</h4>
+    {description && <p className="emptyStateDescription">{description}</p>}
+    {action && <div className="emptyStateAction">{action}</div>}
   </div>
 );
 
