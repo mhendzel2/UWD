@@ -8,7 +8,7 @@ import EcologyPanel from "./components/EcologyPanel";
 import EnsemblePanel from "./components/EnsemblePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
-import AnomaliesPanel from "./components/AnomaliesPanel";
+import AnomaliesPanel from "./components/AnomaliesPanel1";
 import LoadingState from "./components/common/LoadingState";
 import ErrorState from "./components/common/ErrorState";
 import { capabilityDefaults } from "./theme";
