@@ -1,0 +1,67 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-lg);
+  border: 1px solid;
+  color: var(--heading);
+}
+
+.normal {
+  padding: 6px 10px;
+  background: var(--chip);
+  font-size: 13px;
+}
+
+.subdued {
+  padding: 4px 8px;
+  background: transparent;
+  font-size: 12px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Status tone colors */
+.success {
+  border-color: var(--status-success);
+}
+
+.success .dot {
+  background: var(--status-success);
+}
+
+.warning {
+  border-color: var(--status-warning);
+}
+
+.warning .dot {
+  background: var(--status-warning);
+}
+
+.danger {
+  border-color: var(--status-danger);
+}
+
+.danger .dot {
+  background: var(--status-danger);
+}
+
+.info {
+  border-color: var(--status-info);
+}
+
+.info .dot {
+  background: var(--status-info);
+}
+
+.neutral {
+  border-color: var(--status-neutral);
+}
+
+.neutral .dot {
+  background: var(--status-neutral);
+}

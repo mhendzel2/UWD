@@ -1,5 +1,6 @@
 import React from "react";
-import { StatusTone, tokens } from "../../theme";
+import { StatusTone } from "../../theme";
+import styles from "./StatusBadge.module.css";
 
 type StatusBadgeProps = {
   tone?: StatusTone;
@@ -8,31 +9,16 @@ type StatusBadgeProps = {
 };
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({ tone = "neutral", label, subdued = false }) => {
-  const color = tokens.status[tone];
+  const toneClass = styles[tone] || styles.neutral;
+  const badgeClasses = [
+    styles.badge,
+    toneClass,
+    subdued ? styles.subdued : styles.normal,
+  ].join(" ");
+
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: subdued ? "4px 8px" : "6px 10px",
-        borderRadius: tokens.radii.lg,
-        background: subdued ? "transparent" : tokens.colors.chip,
-        border: `1px solid ${color}`,
-        color: tokens.colors.heading,
-        fontSize: subdued ? "12px" : "13px",
-      }}
-      aria-label={label}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: color,
-        }}
-      />
+    <span className={badgeClasses} aria-label={label}>
+      <span className={styles.dot} aria-hidden />
       {label}
     </span>
   );
