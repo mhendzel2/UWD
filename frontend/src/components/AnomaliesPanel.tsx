@@ -41,6 +41,7 @@ type Rollup = {
 };
 
 const sources = ["ALL", "OI_DIFF", "HOT_CHAINS", "DARKPOOL_EOD", "STOCK_SCREENER"];
+const HEAVY_DATASET_THRESHOLD = 500;
 
 const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLog }) => {
   const [lookback, setLookback] = useState<string>("30");
@@ -149,7 +150,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
 
   const visibleEvents = useMemo(() => events.slice(0, displayLimit), [displayLimit, events]);
   const isTruncated = events.length > displayLimit;
-  const isHeavyDataset = events.length > 500;
+  const isHeavyDataset = events.length > HEAVY_DATASET_THRESHOLD;
 
   return (
     <section className="anomalyPanel">
