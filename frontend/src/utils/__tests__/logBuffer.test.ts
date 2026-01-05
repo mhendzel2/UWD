@@ -15,7 +15,7 @@ describe("logBuffer", () => {
   });
 
   it("formats log message with level and time", () => {
-    const ts = new Date("2024-01-01T12:00:00Z").getTime();
+    const ts = Date.now();
     const message = formatLogMessage({ message: "hello", level: "warning", timestamp: ts });
     expect(message).toContain("WARNING");
     expect(message).toContain("hello");
