@@ -10,3 +10,120 @@
   gap: 8px;
   max-width: 640px;
 }
+
+.userControls {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.authRow {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.tokenRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.tokenRow input {
+  min-width: 260px;
+}
+
+.capsGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  min-width: 280px;
+  max-width: 420px;
+}
+
+.capPill {
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.capPill.allowed {
+  background: #f0fff4;
+  border-color: #38a169;
+  color: #22543d;
+}
+
+.capPill.blocked {
+  background: #fff5f5;
+  border-color: #f56565;
+  color: #742a2a;
+}
+
+.pillLabel {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.pillValue {
+  font-weight: 700;
+}
+
+.computeRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.computeButton[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toastShelf {
+  position: fixed;
+  right: 16px;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.toast.info {
+  background: #1a365d;
+}
+
+.toast.error {
+  background: #b91c1c;
+}
+
+.toast button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
