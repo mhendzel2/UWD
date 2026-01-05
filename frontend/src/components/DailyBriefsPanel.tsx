@@ -111,10 +111,19 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {}, status }) =
     const label = brief?.status || brief?.entries?.status || "unknown";
     const updated = brief?.updated_at || brief?.entries?.updated_at;
     const tone = label === "published" || label === "complete" ? "success" : label === "draft" ? "warning" : "neutral";
+    const formattedDate = updated
+      ? new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(updated))
+      : null;
     return (
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <StatusBadge tone={tone} label={`Status: ${label}`} subdued />
-        {updated && <span style={{ color: tokens.colors.muted, fontSize: 12 }}>Updated {new Date(updated).toLocaleString()}</span>}
+        {formattedDate && <span style={{ color: tokens.colors.muted, fontSize: 12 }}>Updated {formattedDate}</span>}
       </div>
     );
   };
