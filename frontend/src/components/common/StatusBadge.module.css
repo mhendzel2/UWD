@@ -1,0 +1,67 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 14px;
+  border: 1px solid;
+  color: #f8fafc;
+}
+
+.normal {
+  padding: 6px 10px;
+  background: #1e293b;
+  font-size: 13px;
+}
+
+.subdued {
+  padding: 4px 8px;
+  background: transparent;
+  font-size: 12px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Status tone colors */
+.success {
+  border-color: #16a34a;
+}
+
+.success .dot {
+  background: #16a34a;
+}
+
+.warning {
+  border-color: #f59e0b;
+}
+
+.warning .dot {
+  background: #f59e0b;
+}
+
+.danger {
+  border-color: #f43f5e;
+}
+
+.danger .dot {
+  background: #f43f5e;
+}
+
+.info {
+  border-color: #38bdf8;
+}
+
+.info .dot {
+  background: #38bdf8;
+}
+
+.neutral {
+  border-color: #94a3b8;
+}
+
+.neutral .dot {
+  background: #94a3b8;
+}
