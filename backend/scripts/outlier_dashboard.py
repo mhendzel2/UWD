@@ -233,6 +233,41 @@ def _run_backfill_outlier_outcomes(
     return int(p.returncode or 0), out.strip()
 
 
+def _run_backfill_compute_v0(
+    *,
+    start_date: date | None,
+    end_date: date | None,
+    include_already_planned: bool,
+    limit: int,
+) -> tuple[int, str]:
+    db_url = _require_db_url()
+    if not db_url:
+        return 2, "UW_DATABASE_URL is not set; cannot backfill compute_v0."
+
+    root = _repo_backend_root()
+    script = root / "scripts" / "backfill_compute_v0.py"
+    cmd = [sys.executable, "-u", str(script)]
+    if start_date:
+        cmd += ["--start-date", start_date.isoformat()]
+    if end_date:
+        cmd += ["--end-date", end_date.isoformat()]
+    if include_already_planned:
+        cmd += ["--include-already-planned"]
+    if limit and int(limit) > 0:
+        cmd += ["--limit", str(int(limit))]
+
+    env = dict(os.environ)
+    env["UW_DATABASE_URL"] = db_url
+
+    try:
+        p = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
+    except Exception as e:
+        return 2, f"Failed to backfill compute_v0: {e}"
+
+    out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
+    return int(p.returncode or 0), out.strip()
+
+
 def _snip_log(text: str, max_chars: int = 8000) -> str:
     if not text:
         return ""
@@ -742,6 +777,15 @@ def main() -> None:
         out_loss = st.number_input("Loss threshold (return)", value=-0.05, step=0.01, format="%.3f")
         out_lookback = st.number_input("Stats lookback days", value=90, min_value=1, step=1)
 
+        st.markdown("**Compute v0 backfill (features/regimes/plans)**")
+        cv0_col1, cv0_col2 = st.columns(2)
+        with cv0_col1:
+            cv0_start = st.date_input("Compute v0 start date (optional)", value=None)
+        with cv0_col2:
+            cv0_end = st.date_input("Compute v0 end date (optional)", value=None)
+        cv0_include = st.checkbox("Include already-planned sessions", value=False)
+        cv0_limit = st.number_input("Compute v0 session limit (0=all)", value=0, min_value=0, step=1)
+
         st.subheader("Latest")
         auto_latest = st.checkbox("Auto-analyze latest date", value=True)
 
@@ -839,6 +883,25 @@ def main() -> None:
                         st.error("Outcomes backfill failed. Check log above.")
                     else:
                         st.success("Outcomes backfilled.")
+
+            if st.button("Backfill compute_v0"):
+                # date_input returns either a date or None depending on Streamlit version;
+                # be defensive and accept only date instances.
+                start_d = cv0_start if isinstance(cv0_start, date) else None
+                end_d = cv0_end if isinstance(cv0_end, date) else None
+                with st.spinner("Running compute_v0 backfill (plans/features/regimes)..."):
+                    rc, out = _run_backfill_compute_v0(
+                        start_date=start_d,
+                        end_date=end_d,
+                        include_already_planned=bool(cv0_include),
+                        limit=int(cv0_limit),
+                    )
+                st.caption("Compute v0 backfill log")
+                st.code(_snip_log(out) or "(no output)")
+                if rc != 0:
+                    st.error("Compute v0 backfill failed. Check log above.")
+                else:
+                    st.success("Compute v0 backfill completed.")
 
             # If we have a DB and the latest session isn't reflected in the CSV yet,
             # automatically recompute just the latest day.
