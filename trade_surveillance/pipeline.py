@@ -308,7 +308,7 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
     write_parquet(out_df, out_path)
 
 
-def score(*, features_path: str, out_path: str) -> None:
+def score(*, features_path: str, out_path: str, use_cross_norm: bool = False) -> None:
     from sklearn.covariance import MinCovDet
     from sklearn.decomposition import PCA
     from sklearn.ensemble import IsolationForest
@@ -319,7 +319,7 @@ def score(*, features_path: str, out_path: str) -> None:
         raise ValueError("features is empty")
 
     # Select a stable feature set (context-normalized z-scores).
-    feature_cols = [
+    feature_cols: list[str] = [
         "qty_z_s",
         "notional_z_s",
         "signed_qty_z_s",
@@ -328,6 +328,18 @@ def score(*, features_path: str, out_path: str) -> None:
         "effective_spread_bps_z_s",
         "gap_s_symbol_z_s",
     ]
+
+    # Optional: add rolling/percentile normalization features for time-varying context.
+    # These are computed in featurize() when possible.
+    if bool(use_cross_norm):
+        feature_cols.extend(
+            [
+                "z_log_notional",
+                "z_log_qty",
+                "pct_notional_in_symbol",
+                "pct_qty_in_symbol",
+            ]
+        )
     feature_cols = [c for c in feature_cols if c in df.columns]
     if not feature_cols:
         raise ValueError("No usable feature columns found (expected *_z_s columns)")

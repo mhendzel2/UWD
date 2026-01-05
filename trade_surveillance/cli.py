@@ -24,6 +24,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("score", help="Fit detectors on features, write scores.parquet")
     s.add_argument("--features", required=True)
     s.add_argument("--out", required=True)
+    s.add_argument(
+        "--use-cross-norm",
+        action="store_true",
+        help="Include rolling/percentile normalization features (z_log_*, pct_*_in_symbol) in scoring when available",
+    )
 
     a = sub.add_parser("run-app", help="Launch dashboard pointing to scores.parquet")
     a.add_argument("--scores", required=True)
@@ -74,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "score":
         from trade_surveillance.pipeline import score
 
-        score(features_path=args.features, out_path=args.out)
+        score(features_path=args.features, out_path=args.out, use_cross_norm=bool(args.use_cross_norm))
         return 0
 
     if args.cmd == "run-app":
