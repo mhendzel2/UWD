@@ -50,7 +50,7 @@ const SessionDashboard: React.FC<Props> = ({
   capabilityState,
   capabilities,
 }) => {
-  const disabledTooltip = (allowed: boolean) => (allowed ? undefined : "Action requires permission");
+  const disabledTooltip = (allowed: boolean) => (allowed ? null : "Action requires permission");
 
   return (
     <section className="panel" aria-label="Session dashboard">
