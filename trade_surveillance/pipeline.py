@@ -97,6 +97,14 @@ def _robust_z(x: pd.Series, center: pd.Series, scale: pd.Series) -> pd.Series:
     return z
 
 
+def _rolling_z_by_group(s: pd.Series, *, window: int, min_periods: int) -> pd.Series:
+    r = s.rolling(window=int(window), min_periods=int(min_periods))
+    mu = r.mean()
+    sd = r.std(ddof=0)
+    sd = sd.replace(0.0, np.nan)
+    return (s - mu) / sd
+
+
 def _context_normalize(
     df: pd.DataFrame,
     numeric_cols: list[str],
@@ -237,6 +245,35 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
             if zcol in f.columns:
                 f[zcol] = pd.to_numeric(f[zcol], errors="coerce").fillna(0.0)
 
+    # Cross-symbol comparability: rolling per-symbol z-scores on log sizes + within-symbol percentiles.
+    # This is effective even without market-cap/ADV data and helps reduce large-cap vs small-cap bias.
+    try:
+        window = 200
+        min_periods = 30
+        f = f.reset_index(drop=False).rename(columns={"index": "__row_id"})
+        f = f.sort_values(["symbol", "timestamp", "__row_id"], kind="mergesort")
+
+        if "notional" in f.columns:
+            ln = np.log1p(pd.to_numeric(f["notional"], errors="coerce").clip(lower=0.0))
+            f["z_log_notional"] = ln.groupby(f["symbol"], sort=False).transform(
+                lambda s: _rolling_z_by_group(s, window=window, min_periods=min_periods)
+            )
+            n = pd.to_numeric(f["notional"], errors="coerce")
+            f["pct_notional_in_symbol"] = n.groupby(f["symbol"], sort=False).rank(pct=True, method="average")
+
+        if "qty" in f.columns:
+            lq = np.log1p(pd.to_numeric(f["qty"], errors="coerce").clip(lower=0.0))
+            f["z_log_qty"] = lq.groupby(f["symbol"], sort=False).transform(
+                lambda s: _rolling_z_by_group(s, window=window, min_periods=min_periods)
+            )
+            q = pd.to_numeric(f["qty"], errors="coerce")
+            f["pct_qty_in_symbol"] = q.groupby(f["symbol"], sort=False).rank(pct=True, method="average")
+
+        f = f.sort_values("__row_id", kind="mergesort").drop(columns=["__row_id"], errors="ignore")
+    except Exception:
+        # Keep featurize robust; these columns are optional.
+        pass
+
     # Select output columns
     keep_cols = [
         "timestamp",
@@ -256,6 +293,13 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
         "tod_seconds",
         "tod_bin",
     ]
+    # Optional cross-symbol normalization fields
+    keep_cols.extend([
+        "z_log_notional",
+        "z_log_qty",
+        "pct_notional_in_symbol",
+        "pct_qty_in_symbol",
+    ])
     for col in numeric_cols:
         keep_cols.extend([f"{col}_z_svt", f"{col}_z_sv", f"{col}_z_s"])
 
