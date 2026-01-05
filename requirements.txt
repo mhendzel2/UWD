@@ -2,3 +2,9 @@
 #
 # Installs the backend in editable mode + optional visualization deps (Streamlit/Plotly)
 -e ./backend[viz]
+
+# Trade surveillance prototype (this repo root)
+-e .
+
+# Dev/test tooling for the prototype
+pytest>=8.2
