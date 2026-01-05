@@ -304,7 +304,13 @@ function App() {
     const connect = () => {
       setLogStatus("connecting");
       socket = new WebSocket(wsUrl);
-      socket.onopen = () => setLogStatus("connected");
+      socket.onopen = () => {
+        if (reconnectTimer.current) {
+          window.clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
+        setLogStatus("connected");
+      };
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
