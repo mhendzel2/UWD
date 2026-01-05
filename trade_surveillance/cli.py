@@ -42,6 +42,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     perf.add_argument("--out-dir", required=True, help="Output directory")
     perf.add_argument("--top-k", type=int, default=5)
+    perf.add_argument(
+        "--min-pct",
+        type=float,
+        default=None,
+        help="If set, score all signals with percentile >= min-pct (overrides --top-k)",
+    )
+    perf.add_argument(
+        "--pct-col",
+        default="ensemble_pct",
+        choices=["ensemble_pct", "ensemble_pct_by_symbol"],
+        help="Percentile column to threshold on when using --min-pct",
+    )
     perf.add_argument("--lookback-days", type=int, default=5)
     perf.add_argument("--forward-days", type=int, default=10)
     perf.add_argument("--tz", default="America/New_York", help="Timezone for session_date bucketing")
@@ -104,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
             prices_dir=None if args.prices_dir in {None, ""} else str(args.prices_dir),
             out_dir=str(args.out_dir),
             top_k=int(args.top_k),
+            min_percentile=None if args.min_pct in {None, ""} else float(args.min_pct),
+            percentile_col=str(args.pct_col),
             lookback_days=int(args.lookback_days),
             forward_days=int(args.forward_days),
             tz=str(args.tz),

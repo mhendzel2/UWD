@@ -14,6 +14,8 @@ from trade_surveillance.options_pricing import BlackScholesInputs, black_scholes
 @dataclass(frozen=True)
 class PerformanceConfig:
     top_k: int = 5
+    min_percentile: float | None = None
+    percentile_col: str = "ensemble_pct"
     lookback_days: int = 5
     forward_days: int = 10
     tz: str = "America/New_York"
@@ -95,6 +97,60 @@ def select_top_k_per_day(scores: pd.DataFrame, *, top_k: int, tz: str) -> pd.Dat
     # Stable signal_id for joining.
     def _mk_id(row: pd.Series) -> str:
         raw = f"{row['session_date']}|{row['symbol']}|{row.get('timestamp','')}|{row['daily_rank']}".encode("utf-8")
+        return sha1(raw).hexdigest()[:16]
+
+    s["signal_id"] = s.apply(_mk_id, axis=1)
+    return s
+
+
+def select_all_above_percentile_per_day(
+    scores: pd.DataFrame,
+    *,
+    min_percentile: float,
+    tz: str,
+    percentile_col: str = "ensemble_pct",
+) -> pd.DataFrame:
+    """Select all signals per day above a percentile cutoff.
+
+    This is meant to support "score all options that pass the initial threshold"
+    workflows: every qualifying alert becomes a priced option scenario.
+    """
+    if scores.empty:
+        return scores
+
+    if "timestamp" not in scores.columns:
+        raise ValueError("scores must include 'timestamp'")
+    if "symbol" not in scores.columns:
+        raise ValueError("scores must include 'symbol'")
+
+    # Prefer requested percentile column, but fall back to whatever exists.
+    if percentile_col in scores.columns:
+        rank_col = percentile_col
+    elif "ensemble_pct" in scores.columns:
+        rank_col = "ensemble_pct"
+    elif "ensemble_score" in scores.columns:
+        rank_col = "ensemble_score"
+    else:
+        raise ValueError("scores must include 'ensemble_pct' (or a compatible rank column)")
+
+    s = scores.copy()
+    s["session_date"] = _session_date(s["timestamp"], tz)
+    s[rank_col] = pd.to_numeric(s[rank_col], errors="coerce")
+    s = s.dropna(subset=["session_date", rank_col])
+
+    cutoff = float(min_percentile)
+    s = s[s[rank_col] >= cutoff].copy()
+
+    # Still compute a daily rank for convenience/debugging.
+    s = s.sort_values(["session_date", rank_col], ascending=[True, False])
+    s["daily_rank"] = s.groupby("session_date").cumcount() + 1
+
+    def _mk_id(row: pd.Series) -> str:
+        raw = (
+            f"{row['session_date']}|{row['symbol']}|{row.get('timestamp','')}|{row['daily_rank']}|{rank_col}".encode(
+                "utf-8"
+            )
+        )
         return sha1(raw).hexdigest()[:16]
 
     s["signal_id"] = s.apply(_mk_id, axis=1)
@@ -244,6 +300,8 @@ def analyze_top_signals_vs_price(
     prices_dir: str | None,
     out_dir: str,
     top_k: int = 5,
+    min_percentile: float | None = None,
+    percentile_col: str = "ensemble_pct",
     lookback_days: int = 5,
     forward_days: int = 10,
     tz: str = "America/New_York",
@@ -256,6 +314,8 @@ def analyze_top_signals_vs_price(
 ) -> None:
     cfg = PerformanceConfig(
         top_k=int(top_k),
+        min_percentile=None if min_percentile in {None, ""} else float(min_percentile),
+        percentile_col=str(percentile_col),
         lookback_days=int(lookback_days),
         forward_days=int(forward_days),
         tz=str(tz),
@@ -271,7 +331,15 @@ def analyze_top_signals_vs_price(
     out.mkdir(parents=True, exist_ok=True)
 
     scores = pd.read_parquet(scores_path)
-    signals = select_top_k_per_day(scores, top_k=cfg.top_k, tz=cfg.tz)
+    if cfg.min_percentile is not None:
+        signals = select_all_above_percentile_per_day(
+            scores,
+            min_percentile=float(cfg.min_percentile),
+            tz=cfg.tz,
+            percentile_col=str(cfg.percentile_col),
+        )
+    else:
+        signals = select_top_k_per_day(scores, top_k=cfg.top_k, tz=cfg.tz)
 
     prices_path = Path(prices_dir) if prices_dir else _default_prices_dir()
     windows, summary = build_price_windows(

@@ -66,3 +66,58 @@ def test_analyze_performance_builds_outputs(tmp_path: Path) -> None:
     assert "signal_id" in sig.columns
     assert "session_date" in sig.columns
     assert "entry_close" in summ.columns
+
+
+def test_analyze_performance_threshold_selects_all_above_cutoff(tmp_path: Path) -> None:
+    scores = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-02T20:00:00Z",
+                    "2026-01-02T20:01:00Z",
+                    "2026-01-02T20:02:00Z",
+                    "2026-01-03T20:00:00Z",
+                    "2026-01-03T20:01:00Z",
+                    "2026-01-03T20:02:00Z",
+                ],
+                utc=True,
+            ),
+            "symbol": ["AAPL"] * 6,
+            "ensemble_pct": [0.90, 0.96, 0.99, 0.20, 0.95, 0.97],
+            "reason": ["r1", "r2", "r3", "r4", "r5", "r6"],
+        }
+    )
+    scores_path = tmp_path / "scores.parquet"
+    scores.to_parquet(scores_path, index=False)
+
+    prices_dir = tmp_path / "prices"
+    prices_dir.mkdir(parents=True, exist_ok=True)
+    prices = pd.DataFrame(
+        {
+            "date": ["2025-12-31", "2026-01-02", "2026-01-03", "2026-01-06"],
+            "open": [102, 103, 104, 105],
+            "high": [103, 104, 105, 106],
+            "low": [101, 102, 103, 104],
+            "close": [102, 103, 104, 105],
+            "volume": [1, 1, 1, 1],
+        }
+    )
+    prices.to_csv(prices_dir / "aapl.us.csv", index=False)
+
+    out_dir = tmp_path / "out"
+    analyze_top_signals_vs_price(
+        scores_path=str(scores_path),
+        prices_dir=str(prices_dir),
+        out_dir=str(out_dir),
+        top_k=1,
+        min_percentile=0.95,
+        percentile_col="ensemble_pct",
+        lookback_days=1,
+        forward_days=1,
+        tz="America/New_York",
+    )
+
+    sig = pd.read_parquet(out_dir / "signals.parquet")
+    # Rows with ensemble_pct >= 0.95: 0.96, 0.99, 0.95, 0.97 => 4
+    assert len(sig) == 4
+    assert "daily_rank" in sig.columns

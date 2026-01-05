@@ -30,15 +30,19 @@ echo UWD_API_PORT=%UWD_API_PORT%
 echo UWD_FRONTEND_PORT=%UWD_FRONTEND_PORT%
 
 REM Optionally start Postgres via docker-compose if docker is available
-where docker >nul 2>&1
-if %errorlevel%==0 (
-  echo.
-  echo Starting docker-compose services (if defined)...
-  docker compose up -d
-) else (
-  echo.
-  echo NOTE: docker not found; skipping docker compose.
-)
+docker --version >nul 2>&1
+if errorlevel 1 goto :skip_docker
+
+echo.
+echo Starting docker-compose services (if defined)...
+docker compose up -d
+goto :after_docker
+
+:skip_docker
+echo.
+echo NOTE: docker not found; skipping docker compose.
+
+:after_docker
 
 REM Start backend API (FastAPI)
 start "UWD API" cmd /k "cd /d \"%~dp0backend\" & ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port %UWD_API_PORT%"
