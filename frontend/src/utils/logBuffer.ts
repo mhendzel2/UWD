@@ -17,7 +17,7 @@ export function appendLog(buffer: LogEntry[], entry: LogEntry): LogEntry[] {
 }
 
 export function formatLogMessage(entry: LogEntry): string {
-  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const time = new Date(entry.timestamp).toISOString().slice(11, 19);
   const level = entry.level?.toUpperCase() ?? "INFO";
   return `[${time}] [${level}] ${entry.message}`;
 }
