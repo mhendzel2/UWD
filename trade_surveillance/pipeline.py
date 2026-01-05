@@ -261,6 +261,34 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
             n = pd.to_numeric(f["notional"], errors="coerce")
             f["pct_notional_in_symbol"] = n.groupby(f["symbol"], sort=False).rank(pct=True, method="average")
 
+            # Rolling liquidity proxies from the trade stream itself.
+            # These help reduce cross-ticker biases (share price / cap / volume differences)
+            # by expressing size relative to recent activity.
+            roll_sum_n = (
+                n.groupby(f["symbol"], sort=False)
+                .rolling(window=window, min_periods=min_periods)
+                .sum()
+                .reset_index(level=0, drop=True)
+            )
+            roll_med_n = (
+                n.groupby(f["symbol"], sort=False)
+                .rolling(window=window, min_periods=min_periods)
+                .median()
+                .reset_index(level=0, drop=True)
+            )
+            denom_sum_n = pd.to_numeric(roll_sum_n, errors="coerce").fillna(0.0) + 1e-9
+            denom_med_n = pd.to_numeric(roll_med_n, errors="coerce").fillna(0.0) + 1e-9
+            f["notional_participation"] = (pd.to_numeric(n, errors="coerce").fillna(0.0) / denom_sum_n).astype(float)
+            f["log_notional_over_roll_median"] = (
+                np.log1p(pd.to_numeric(n, errors="coerce").fillna(0.0).clip(lower=0.0))
+                - np.log1p(pd.to_numeric(denom_med_n, errors="coerce").fillna(0.0).clip(lower=0.0))
+            ).astype(float)
+            f["z_log_notional_over_roll_median"] = pd.Series(
+                f["log_notional_over_roll_median"], dtype=float
+            ).groupby(f["symbol"], sort=False).transform(
+                lambda s: _rolling_z_by_group(s, window=window, min_periods=min_periods)
+            )
+
         if "qty" in f.columns:
             lq = np.log1p(pd.to_numeric(f["qty"], errors="coerce").clip(lower=0.0))
             f["z_log_qty"] = lq.groupby(f["symbol"], sort=False).transform(
@@ -268,6 +296,29 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
             )
             q = pd.to_numeric(f["qty"], errors="coerce")
             f["pct_qty_in_symbol"] = q.groupby(f["symbol"], sort=False).rank(pct=True, method="average")
+
+            roll_sum_q = (
+                q.groupby(f["symbol"], sort=False)
+                .rolling(window=window, min_periods=min_periods)
+                .sum()
+                .reset_index(level=0, drop=True)
+            )
+            roll_med_q = (
+                q.groupby(f["symbol"], sort=False)
+                .rolling(window=window, min_periods=min_periods)
+                .median()
+                .reset_index(level=0, drop=True)
+            )
+            denom_sum_q = pd.to_numeric(roll_sum_q, errors="coerce").fillna(0.0) + 1e-9
+            denom_med_q = pd.to_numeric(roll_med_q, errors="coerce").fillna(0.0) + 1e-9
+            f["qty_participation"] = (pd.to_numeric(q, errors="coerce").fillna(0.0) / denom_sum_q).astype(float)
+            f["log_qty_over_roll_median"] = (
+                np.log1p(pd.to_numeric(q, errors="coerce").fillna(0.0).clip(lower=0.0))
+                - np.log1p(pd.to_numeric(denom_med_q, errors="coerce").fillna(0.0).clip(lower=0.0))
+            ).astype(float)
+            f["z_log_qty_over_roll_median"] = pd.Series(f["log_qty_over_roll_median"], dtype=float).groupby(
+                f["symbol"], sort=False
+            ).transform(lambda s: _rolling_z_by_group(s, window=window, min_periods=min_periods))
 
         f = f.sort_values("__row_id", kind="mergesort").drop(columns=["__row_id"], errors="ignore")
     except Exception:
@@ -299,6 +350,12 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
         "z_log_qty",
         "pct_notional_in_symbol",
         "pct_qty_in_symbol",
+        "notional_participation",
+        "qty_participation",
+        "log_notional_over_roll_median",
+        "log_qty_over_roll_median",
+        "z_log_notional_over_roll_median",
+        "z_log_qty_over_roll_median",
     ])
     for col in numeric_cols:
         keep_cols.extend([f"{col}_z_svt", f"{col}_z_sv", f"{col}_z_s"])
@@ -338,6 +395,10 @@ def score(*, features_path: str, out_path: str, use_cross_norm: bool = False) ->
                 "z_log_qty",
                 "pct_notional_in_symbol",
                 "pct_qty_in_symbol",
+                "notional_participation",
+                "qty_participation",
+                "z_log_notional_over_roll_median",
+                "z_log_qty_over_roll_median",
             ]
         )
     feature_cols = [c for c in feature_cols if c in df.columns]
@@ -429,6 +490,11 @@ def score(*, features_path: str, out_path: str, use_cross_norm: bool = False) ->
     pct_cols = [f"pct_{c}" for c in score_cols]
     out["ensemble_score"] = out[pct_cols].mean(axis=1)
     out["ensemble_pct"] = out["ensemble_score"].rank(pct=True, method="average")
+
+    # Per-symbol calibration for alerting/thresholding.
+    # This is the simplest, robust way to remove cross-ticker scale bias when selecting top signals.
+    if "symbol" in out.columns:
+        out["ensemble_pct_by_symbol"] = out.groupby("symbol")["ensemble_score"].rank(pct=True, method="average")
 
     # Reason codes: top method(s) + top abs feature z(s)
     # Keep it compact, single string column.
