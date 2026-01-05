@@ -7,6 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from app.anomalies import compute_anomalies_for_session, ScoredAnomaly, TickerRollup
+from app.api.auth import (
+    AuthenticatedUser,
+    Capability,
+    capabilities_for_user,
+    get_current_user,
+    require_capability,
+)
 from app.api.ws import notify_decision, notify_log
 from app.briefs.generate_v1 import generate_briefs
 from app.db.engine import SessionLocal
@@ -64,6 +71,22 @@ def get_latest_session(db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="No sessions found")
     return {"session_id": str(session.session_id), "date": session.date, "strategy_mode": session.strategy_mode}
+
+
+@router.get("/sessions/{session_id}/capabilities")
+def get_session_capabilities(
+    session_id: str,
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "role": user.role.value,
+        "capabilities": capabilities_for_user(user),
+    }
 
 
 @router.post("/sessions/ensure")
@@ -353,6 +376,7 @@ def compute_v0(
     session_id: str = Form(...),
     asof_date: str = Form(...),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.COMPUTE_V0)),
 ):
     session = db.get(models.Session, session_id)
     if not session:
@@ -432,6 +456,7 @@ def compute_ecology_v0(
     session_id: str = Form(...),
     asof_date: str = Form(...),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.COMPUTE_ECOLOGY)),
 ):
     session = db.get(models.Session, session_id)
     if not session:
@@ -460,6 +485,7 @@ def generate_briefs_v1(
     session_id: str = Form(...),
     asof_date: str | None = Form(None),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.GENERATE_BRIEFS)),
 ):
     session = db.get(models.Session, session_id)
     if not session:
@@ -493,6 +519,7 @@ def compute_v1(
     session_id: str = Form(...),
     asof_date: str = Form(...),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.COMPUTE_V1)),
 ):
     session = db.get(models.Session, session_id)
     if not session:
@@ -555,6 +582,7 @@ def compute_anomalies_v1(
     session_id: str = Form(...),
     lookback_sessions: int = Form(30),
     db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.COMPUTE_ANOMALIES)),
 ):
     session = db.get(models.Session, session_id)
     if not session:

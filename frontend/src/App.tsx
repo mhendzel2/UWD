@@ -9,6 +9,9 @@ import EnsemblePanel from "./components/EnsemblePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
 import AnomaliesPanel from "./components/AnomaliesPanel";
+import ToastShelf from "./components/ToastShelf";
+import { UserStateProvider, useUserState } from "./state/user";
+import { handleAuthFailure } from "./utils/http";
 import "./App.css";
 
 const API_BASE = "http://localhost:8000";
@@ -18,7 +21,7 @@ type RegimeRow = { underlying: string; regime_label?: string; confidence_tier?: 
 type Brief = { brief_type: string; entries: any };
 type Ensemble = { underlying: string; ensemble_label: string; ensemble_confidence?: number; horizon_weights?: Record<string, number>; component_votes?: any; stability_metrics?: any };
 
-function App() {
+function AppContent() {
   const [sessionId, setSessionId] = useState<string>("");
   const [sessionDate, setSessionDate] = useState<string>("");
   const [strategyMode, setStrategyMode] = useState<string>("INDEX_EOD");
@@ -27,6 +30,9 @@ function App() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [ensembles, setEnsembles] = useState<Ensemble[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const { token, pushToast } = useUserState();
+
+  const authHeaders = useMemo<HeadersInit | undefined>(() => (token ? { Authorization: `Bearer ${token}` } : undefined), [token]);
 
   const loadLatestSession = useCallback(async () => {
     try {
@@ -46,32 +52,6 @@ function App() {
   useEffect(() => {
     loadLatestSession();
   }, [loadLatestSession]);
-
-  useEffect(() => {
-    if (sessionId) {
-      loadRegimes();
-      loadBriefs();
-      loadEnsembles();
-    }
-  }, [sessionId]);
-
-  const createSession = useCallback(async () => {
-    const form = new FormData();
-    form.append("session_date", sessionDate);
-    form.append("strategy_mode", strategyMode);
-    const res = await fetch(`${API_BASE}/sessions`, { method: "POST", body: form });
-    if (!res.ok) {
-      alert("Failed to create session");
-      return;
-    }
-    const data = await res.json();
-    setSessionId(data.session_id);
-    setDecisions([]);
-    setRegimes([]);
-    setBriefs([]);
-    setEnsembles([]);
-    setLogs((prev) => [`Created session ${data.session_id}`, ...prev]);
-  }, [sessionDate, strategyMode]);
 
   const loadRegimes = useCallback(async () => {
     if (!sessionId) return;
@@ -97,70 +77,112 @@ function App() {
     setEnsembles(data.ensembles || []);
   }, [sessionId]);
 
-  const compute = useCallback(async () => {
-    if (!sessionId) {
-      alert("Create a session first");
+  useEffect(() => {
+    if (sessionId) {
+      loadRegimes();
+      loadBriefs();
+      loadEnsembles();
+    }
+  }, [loadBriefs, loadEnsembles, loadRegimes, sessionId]);
+
+  const createSession = useCallback(async () => {
+    const form = new FormData();
+    form.append("session_date", sessionDate);
+    form.append("strategy_mode", strategyMode);
+    const res = await fetch(`${API_BASE}/sessions`, { method: "POST", body: form });
+    if (!res.ok) {
+      pushToast({ tone: "error", message: "Failed to create session" });
       return;
     }
+    const data = await res.json();
+    setSessionId(data.session_id);
+    setDecisions([]);
+    setRegimes([]);
+    setBriefs([]);
+    setEnsembles([]);
+    setLogs((prev) => [`Created session ${data.session_id}`, ...prev]);
+  }, [pushToast, sessionDate, strategyMode]);
+
+  const ensureAuthToken = useCallback(() => {
+    if (!token) {
+      pushToast({ tone: "error", message: "Add an auth token to run compute endpoints." });
+      return false;
+    }
+    return true;
+  }, [pushToast, token]);
+
+  const compute = useCallback(async () => {
+    if (!sessionId) {
+      pushToast({ tone: "error", message: "Create a session first" });
+      return;
+    }
+    if (!ensureAuthToken()) return;
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
-    const res = await fetch(`${API_BASE}/compute/v0`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/compute/v0`, { method: "POST", body: form, headers: authHeaders });
+    if (await handleAuthFailure(res, pushToast)) return;
     if (res.ok) {
       const data = await res.json();
       setDecisions(data.decisions || []);
       setLogs((prev) => [`Computed v0 regimes (${data.decisions?.length || 0})`, ...prev]);
       loadRegimes();
     } else {
-      alert("Compute failed");
+      pushToast({ tone: "error", message: "Compute failed" });
     }
-  }, [sessionDate, sessionId, loadRegimes]);
+  }, [authHeaders, ensureAuthToken, loadRegimes, pushToast, sessionDate, sessionId]);
 
   const computeEcology = useCallback(async () => {
     if (!sessionId) {
-      alert("Create a session first");
+      pushToast({ tone: "error", message: "Create a session first" });
       return;
     }
+    if (!ensureAuthToken()) return;
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
-    const res = await fetch(`${API_BASE}/compute/ecology_v0`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/compute/ecology_v0`, { method: "POST", body: form, headers: authHeaders });
+    if (await handleAuthFailure(res, pushToast)) return;
     if (res.ok) {
       const data = await res.json();
       setLogs((prev) => [`Ecology updated (${data.updated})`, ...prev]);
       loadRegimes();
     } else {
-      alert("Ecology compute failed");
+      pushToast({ tone: "error", message: "Ecology compute failed" });
     }
-  }, [sessionDate, sessionId, loadRegimes]);
+  }, [authHeaders, ensureAuthToken, loadRegimes, pushToast, sessionDate, sessionId]);
 
   const generateDailyBriefs = useCallback(async () => {
     if (!sessionId) {
-      alert("Create a session first");
+      pushToast({ tone: "error", message: "Create a session first" });
       return;
     }
+    if (!ensureAuthToken()) return;
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
-    const res = await fetch(`${API_BASE}/briefs/generate_v1`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/briefs/generate_v1`, { method: "POST", body: form, headers: authHeaders });
+    if (await handleAuthFailure(res, pushToast)) return;
     if (res.ok) {
       const data = await res.json();
       setBriefs(data.briefs || []);
       setLogs((prev) => [`Generated briefs (${data.briefs?.length || 0})`, ...prev]);
     } else {
-      alert("Brief generation failed");
+      pushToast({ tone: "error", message: "Brief generation failed" });
     }
-  }, [sessionDate, sessionId]);
+  }, [authHeaders, ensureAuthToken, pushToast, sessionDate, sessionId]);
 
   const computeV1 = useCallback(async () => {
     if (!sessionId) {
-      alert("Create a session first");
+      pushToast({ tone: "error", message: "Create a session first" });
       return;
     }
+    if (!ensureAuthToken()) return;
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
-    const res = await fetch(`${API_BASE}/compute/v1`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/compute/v1`, { method: "POST", body: form, headers: authHeaders });
+    if (await handleAuthFailure(res, pushToast)) return;
     if (res.ok) {
       const data = await res.json();
       if (data.ensembles) {
@@ -169,9 +191,9 @@ function App() {
       setLogs((prev) => [`Computed v1 ensemble (${data.ensembles?.length || 0})`, ...prev]);
       loadEnsembles();
     } else {
-      alert("v1 compute failed");
+      pushToast({ tone: "error", message: "v1 compute failed" });
     }
-  }, [sessionDate, sessionId, loadEnsembles]);
+  }, [authHeaders, ensureAuthToken, loadEnsembles, pushToast, sessionDate, sessionId]);
 
   const decisionTable = useMemo(
     () =>
@@ -204,6 +226,7 @@ function App() {
 
   return (
     <div className="appRoot">
+      <ToastShelf />
       <header>
         <h1>Regime-First EOD v1</h1>
         <p>Discovery briefs, ecology interpretability, and v1 ensemble layered on v0 compatibility.</p>
@@ -227,15 +250,17 @@ function App() {
         {sessionId && <div>Session ID: {sessionId}</div>}
       </section>
 
-      <UploadDataset 
-        apiBase={API_BASE} 
-        sessionId={sessionId} 
+      <UploadDataset
+        apiBase={API_BASE}
+        sessionId={sessionId}
         onSessionCreated={handleSessionCreated}
-        onUploaded={(msg) => setLogs((prev) => [msg, ...prev])} 
+        onUploaded={(msg) => setLogs((prev) => [msg, ...prev])}
       />
 
       <SessionDashboard
+        apiBase={API_BASE}
         sessionId={sessionId}
+        sessionDate={sessionDate}
         onCompute={compute}
         onComputeEcology={computeEcology}
         onGenerateBriefs={generateDailyBriefs}
@@ -270,4 +295,10 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <UserStateProvider>
+      <AppContent />
+    </UserStateProvider>
+  );
+}

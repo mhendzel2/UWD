@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useUserState } from "../state/user";
+import { handleAuthFailure } from "../utils/http";
 import "./AnomaliesPanel.css";
 
 type Props = {
@@ -48,6 +50,8 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
   const [selected, setSelected] = useState<AnomalyEvent | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const { token, capabilityFor, pushToast } = useUserState();
+  const authHeaders = useMemo<HeadersInit | undefined>(() => (token ? { Authorization: `Bearer ${token}` } : undefined), [token]);
 
   const fetchAnomalies = useCallback(async () => {
     if (!sessionId) return;
@@ -82,13 +86,31 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       setError("Create or select a session first.");
       return;
     }
+    const cap = capabilityFor("compute_anomalies");
+    if (!cap.allowed) {
+      const message = cap.reason || "You are not authorized to compute anomalies.";
+      setError(message);
+      pushToast({ tone: "error", message });
+      return;
+    }
+    if (!token) {
+      const message = "Add an auth token to compute anomalies.";
+      setError(message);
+      pushToast({ tone: "error", message });
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const form = new FormData();
       form.append("session_id", sessionId);
       form.append("lookback_sessions", lookback || "30");
-      const res = await fetch(`${apiBase}/compute/anomalies_v1`, { method: "POST", body: form });
+      const res = await fetch(`${apiBase}/compute/anomalies_v1`, { method: "POST", body: form, headers: authHeaders });
+      const handled = await handleAuthFailure(res, pushToast);
+      if (handled) {
+        setError("Authorization required to compute anomalies.");
+        return;
+      }
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Compute failed");
@@ -103,7 +125,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
     } finally {
       setLoading(false);
     }
-  }, [apiBase, lookback, onLog, sessionId]);
+  }, [apiBase, authHeaders, capabilityFor, lookback, onLog, pushToast, sessionId, token]);
 
   const summary = useMemo(() => {
     const bySource: Record<string, number> = {};
@@ -169,7 +191,11 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
           <button onClick={fetchAnomalies} className="ghost">
             Refresh
           </button>
-          <button onClick={computeAnomalies} disabled={loading || !sessionId}>
+          <button
+            onClick={computeAnomalies}
+            disabled={loading || !sessionId || !capabilityFor("compute_anomalies").allowed}
+            title={!capabilityFor("compute_anomalies").allowed ? capabilityFor("compute_anomalies").reason || "Not authorized" : undefined}
+          >
             {loading ? "Computing…" : "Compute anomalies"}
           </button>
         </div>
