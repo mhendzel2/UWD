@@ -35,8 +35,10 @@ def test_score_writes_parquet(tmp_path: Path) -> None:
         "score_changepoint",
         "ensemble_score",
         "ensemble_pct",
+        "ensemble_pct_by_symbol",
         "reason",
     ]:
         assert col in df.columns
 
     assert df["ensemble_pct"].between(0.0, 1.0).all()
+    assert df["ensemble_pct_by_symbol"].between(0.0, 1.0).all()

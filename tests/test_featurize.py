@@ -40,14 +40,14 @@ def test_featurize_writes_parquet(tmp_path: Path) -> None:
     # Normalized columns exist and are numeric
     assert "qty_z_s" in df.columns
     assert df["qty_z_s"].dtype.kind in {"f", "i"}
-    
-        # Liquidity/volume normalization features (from trade stream)
-        for col in [
-            "notional_participation",
-            "qty_participation",
-            "log_notional_over_roll_median",
-            "log_qty_over_roll_median",
-            "z_log_notional_over_roll_median",
-            "z_log_qty_over_roll_median",
-        ]:
-            assert col in df.columns
+
+    # Liquidity/volume normalization features (from trade stream)
+    for col in [
+        "notional_participation",
+        "qty_participation",
+        "log_notional_over_roll_median",
+        "log_qty_over_roll_median",
+        "z_log_notional_over_roll_median",
+        "z_log_qty_over_roll_median",
+    ]:
+        assert col in df.columns

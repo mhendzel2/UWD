@@ -160,6 +160,9 @@ def run(*, scores_path: str) -> None:
     if "ensemble_pct" not in df.columns and "ensemble_score" in df.columns:
         df["ensemble_pct"] = df["ensemble_score"].rank(pct=True, method="average")
 
+    if "ensemble_pct_by_symbol" not in df.columns and "ensemble_score" in df.columns and "symbol" in df.columns:
+        df["ensemble_pct_by_symbol"] = df.groupby("symbol")["ensemble_score"].rank(pct=True, method="average")
+
     if "ensemble_pct" not in df.columns:
         st.error("Missing required column: ensemble_pct")
         st.stop()
@@ -168,8 +171,14 @@ def run(*, scores_path: str) -> None:
     left, right = st.columns([2, 3])
     with left:
         st.caption("High-stringency view")
+        pct_options = [("Global percentile (ensemble_pct)", "ensemble_pct")]
+        if "ensemble_pct_by_symbol" in df.columns:
+            pct_options.insert(0, ("Per-symbol percentile (ensemble_pct_by_symbol)", "ensemble_pct_by_symbol"))
+        pct_label = st.selectbox("Percentile basis", options=[o[0] for o in pct_options], index=0)
+        pct_col = dict(pct_options)[pct_label]
+
         default_cut = 0.99
-        min_pct = st.slider("Minimum ensemble percentile", 0.0, 1.0, float(default_cut), 0.005)
+        min_pct = st.slider(f"Minimum percentile ({pct_col})", 0.0, 1.0, float(default_cut), 0.005)
         max_rows = st.number_input("Max rows", min_value=50, max_value=5000, value=500, step=50)
         show_all_cols = st.checkbox("Show all columns", value=False)
 
@@ -182,7 +191,7 @@ def run(*, scores_path: str) -> None:
     if enable_norm:
         df = _add_normalized_columns(df, lookback=int(lookback), min_periods=int(min_periods))
 
-    filtered = df[df["ensemble_pct"] >= float(min_pct)].copy()
+    filtered = df[pd.to_numeric(df.get(pct_col), errors="coerce").fillna(0.0) >= float(min_pct)].copy()
     filtered = filtered.sort_values("ensemble_pct", ascending=False)
 
     with right:
@@ -211,7 +220,7 @@ def run(*, scores_path: str) -> None:
                 "z_log_notional",
                 "pct_qty_in_symbol",
                 "pct_notional_in_symbol",
-                "ensemble_pct",
+                pct_col,
                 "ensemble_score",
                 "score_mcd_mahal",
                 "score_isoforest",
@@ -234,7 +243,7 @@ def run(*, scores_path: str) -> None:
 
         c1, c2 = st.columns(2)
         with c1:
-            fig = px.histogram(plot_df, x="ensemble_pct", nbins=50, title="Ensemble percentile distribution")
+            fig = px.histogram(plot_df, x=pct_col, nbins=50, title=f"Percentile distribution ({pct_col})")
             st.plotly_chart(fig, use_container_width=True)
         with c2:
             if "symbol" in plot_df.columns:
@@ -270,7 +279,7 @@ def run(*, scores_path: str) -> None:
                 fig = px.scatter(
                     plot_df,
                     x=x,
-                    y="ensemble_pct",
+                    y=pct_col,
                     color="symbol" if "symbol" in plot_df.columns else None,
                     hover_data=[c for c in ["reason", "venue", "side"] if c in plot_df.columns],
                     title=f"{x_label} vs ensemble percentile",
