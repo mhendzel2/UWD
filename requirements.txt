@@ -4,6 +4,7 @@
 -e ./backend[viz]
 
 # Trade surveillance prototype (this repo root)
+# Installs numpy/pandas/pyarrow/scikit-learn/streamlit/plotly via pyproject.toml
 -e .
 
 # Dev/test tooling for the prototype

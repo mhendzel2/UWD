@@ -12,7 +12,24 @@ def run(*, scores_path: str) -> None:
 
     p = Path(scores_path)
     if not p.exists():
+        alt = None
+        # Common Windows/PowerShell pitfall: running generate/featurize/score from `backend/`
+        # writes under `backend/backend/tmp/...` instead of `backend/tmp/...`.
+        try:
+            s = str(p).replace("backend\\tmp\\", "backend\\backend\\tmp\\")
+            if s != str(p):
+                alt_path = Path(s)
+                if alt_path.exists():
+                    alt = alt_path
+        except Exception:
+            alt = None
+
         st.error(f"scores file not found: {p}")
+        st.caption(f"Working directory: {Path.cwd()}")
+        st.caption(f"Resolved path: {p.resolve()}")
+        if alt is not None:
+            st.info(f"Found a likely file here instead: {alt}")
+            st.info("Tip: re-run with that path, or run commands from the repo root.")
         st.info("Run: python -m trade_surveillance score --features <features.parquet> --out <scores.parquet>")
         st.stop()
 

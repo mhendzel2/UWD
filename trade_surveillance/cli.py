@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
+from pathlib import Path
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,9 +59,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "run-app":
-        from trade_surveillance.viz.app import run
-
-        run(scores_path=args.scores)
-        return 0
+        script = Path(__file__).resolve().parent / "viz" / "streamlit_app.py"
+        cmd = [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            str(script),
+            "--",
+            "--scores",
+            str(args.scores),
+        ]
+        return int(subprocess.call(cmd))
 
     raise AssertionError(f"Unhandled cmd: {args.cmd}")
