@@ -1,4 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import EmptyState from "./common/EmptyState";
+import ErrorState from "./common/ErrorState";
+import LoadingState from "./common/LoadingState";
 import "./AnomaliesPanel.css";
 
 type Props = {
@@ -46,11 +49,14 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
   const [events, setEvents] = useState<AnomalyEvent[]>([]);
   const [rollups, setRollups] = useState<Rollup[]>([]);
   const [selected, setSelected] = useState<AnomalyEvent | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [computing, setComputing] = useState<boolean>(false);
+  const [listLoading, setListLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
   const fetchAnomalies = useCallback(async () => {
     if (!sessionId) return;
+    setListLoading(true);
+    setError("");
     const params = new URLSearchParams();
     if (tickerFilter) params.append("ticker", tickerFilter.trim().toUpperCase());
     if (sourceFilter !== "ALL") params.append("source", sourceFilter);
@@ -65,15 +71,26 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       const json = await res.json();
       setEvents(json.events || []);
       setRollups(json.rollups || []);
-      if (json.events && json.events.length > 0) {
-        setSelected(json.events[0]);
-      }
+      setSelected(json.events && json.events.length > 0 ? json.events[0] : null);
     } catch (e: any) {
       setError(e?.message || "Failed to load anomalies");
+      setEvents([]);
+      setRollups([]);
+      setSelected(null);
+    } finally {
+      setListLoading(false);
     }
   }, [apiBase, minScore, sessionId, sourceFilter, tickerFilter]);
 
   useEffect(() => {
+    if (!sessionId) {
+      setEvents([]);
+      setRollups([]);
+      setSelected(null);
+      setError("");
+      setListLoading(false);
+      return;
+    }
     fetchAnomalies();
   }, [fetchAnomalies, sessionId]);
 
@@ -82,7 +99,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       setError("Create or select a session first.");
       return;
     }
-    setLoading(true);
+    setComputing(true);
     setError("");
     try {
       const form = new FormData();
@@ -101,7 +118,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
     } catch (e: any) {
       setError(e?.message || "Compute failed");
     } finally {
-      setLoading(false);
+      setComputing(false);
     }
   }, [apiBase, lookback, onLog, sessionId]);
 
@@ -169,13 +186,12 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
           <button onClick={fetchAnomalies} className="ghost">
             Refresh
           </button>
-          <button onClick={computeAnomalies} disabled={loading || !sessionId}>
-            {loading ? "Computing…" : "Compute anomalies"}
+          <button onClick={computeAnomalies} disabled={computing || !sessionId}>
+            {computing ? "Computing…" : "Compute anomalies"}
           </button>
         </div>
       </div>
-
-      {error && <div className="error">{error}</div>}
+      {error && !listLoading && <ErrorState message={error} onRetry={fetchAnomalies} retryLabel="Retry fetch" />}
 
       <div className="summaryRow">
         {Object.entries(summary).map(([src, count]) => (
@@ -194,41 +210,49 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       </div>
 
       <div className="tableWrap">
-        <table className="anomalyTable">
-          <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Source</th>
-              <th>Severity</th>
-              <th>Ensemble</th>
-              <th>Reasons</th>
-              <th>Event Key</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((ev) => (
-              <tr
-                key={`${ev.event_key}-${ev.source}`}
-                className={selected?.event_key === ev.event_key ? "selectedRow" : ""}
-                onClick={() => setSelected(ev)}
-              >
-                <td>{ev.ticker}</td>
-                <td>{ev.source}</td>
-                <td className="numeric">{ev.severity_score?.toFixed(2)}</td>
-                <td className="numeric">{ev.ensemble_score?.toFixed(2)}</td>
-                <td className="reasonCell">
-                  {ev.reason_codes?.slice(0, 3).map((r, idx) => (
-                    <span key={idx} className="reasonChip">
-                      {r}
-                    </span>
-                  ))}
-                </td>
-                <td className="eventKey">{ev.event_key}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!events.length && <div className="empty">No anomalies found for this filter.</div>}
+        {listLoading && <LoadingState message="Loading anomalies..." />}
+        {!listLoading && !sessionId && <EmptyState message="Create or select a session to review anomalies." />}
+        {!listLoading && sessionId && (
+          <>
+            <table className="anomalyTable">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Source</th>
+                  <th>Severity</th>
+                  <th>Ensemble</th>
+                  <th>Reasons</th>
+                  <th>Event Key</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((ev) => (
+                  <tr
+                    key={`${ev.event_key}-${ev.source}`}
+                    className={selected?.event_key === ev.event_key ? "selectedRow" : ""}
+                    onClick={() => setSelected(ev)}
+                  >
+                    <td>{ev.ticker}</td>
+                    <td>{ev.source}</td>
+                    <td className="numeric">{ev.severity_score?.toFixed(2)}</td>
+                    <td className="numeric">{ev.ensemble_score?.toFixed(2)}</td>
+                    <td className="reasonCell">
+                      {ev.reason_codes?.slice(0, 3).map((r, idx) => (
+                        <span key={idx} className="reasonChip">
+                          {r}
+                        </span>
+                      ))}
+                    </td>
+                    <td className="eventKey">{ev.event_key}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!events.length && (
+              <EmptyState message="No anomalies found for this filter." actionLabel="Retry" onAction={fetchAnomalies} />
+            )}
+          </>
+        )}
       </div>
 
       {selected && (

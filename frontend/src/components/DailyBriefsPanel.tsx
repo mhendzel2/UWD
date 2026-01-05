@@ -1,4 +1,7 @@
 import React, { useMemo, useState } from "react";
+import EmptyState from "./common/EmptyState";
+import ErrorState from "./common/ErrorState";
+import LoadingState from "./common/LoadingState";
 
 type BriefEntry = Record<string, any>;
 type Brief = {
@@ -9,6 +12,10 @@ type Brief = {
 type Props = {
   briefs: Brief[];
   regimeMap?: Record<string, string>;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
+  hasSession?: boolean;
 };
 
 const tabs = [
@@ -17,7 +24,7 @@ const tabs = [
   { key: "VOL_BUY_PREMIUM", label: "Low IV Buy Premium" },
 ];
 
-const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
+const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {}, loading, error, onRetry, hasSession }) => {
   const [active, setActive] = useState<string>(tabs[0].key);
 
   const activeBrief = useMemo(() => briefs.find((b) => b.brief_type === active), [briefs, active]);
@@ -97,7 +104,10 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
   );
 
   const renderContent = () => {
-    if (!activeBrief) return <p>No brief loaded.</p>;
+    if (loading) return <LoadingState message="Loading briefs..." hint="Fetching discovery briefs for this session." />;
+    if (error) return <ErrorState message={error} onRetry={onRetry} retryLabel="Retry fetch" />;
+    if (!hasSession) return <EmptyState message="Create or select a session to view briefs." />;
+    if (!activeBrief) return <EmptyState message="No brief loaded." actionLabel="Refresh" onAction={onRetry} />;
     if (activeBrief.brief_type === "FLOW_SHORT_TERM") {
       return (
         <>

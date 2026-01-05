@@ -1,0 +1,55 @@
+.panelState {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #d4d8e1;
+  border-radius: 6px;
+  background: #fafbff;
+  color: #1f2937;
+}
+
+.loadingState {
+  gap: 12px;
+}
+
+.errorState {
+  border-color: #fca5a5;
+  background: #fff5f5;
+}
+
+.emptyState {
+  border-color: #e5e7eb;
+}
+
+.panelStateTitle {
+  font-weight: 600;
+}
+
+.panelStateHint {
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #d1d5db;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.retryButton {
+  padding: 6px 10px;
+  border: 1px solid #4b5563;
+  background: #fff;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

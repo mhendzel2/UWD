@@ -6,9 +6,9 @@ import LogsPanel from "./components/LogsPanel";
 import DailyBriefsPanel from "./components/DailyBriefsPanel";
 import EcologyPanel from "./components/EcologyPanel";
 import EnsemblePanel from "./components/EnsemblePanel";
-import ChartsPanel from "./components/ChartsPanel";
 import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
 import AnomaliesPanel from "./components/AnomaliesPanel";
+import RegimesPanel from "./components/RegimesPanel";
 import "./App.css";
 
 const API_BASE = "http://localhost:8000";
@@ -17,6 +17,7 @@ type Decision = { underlying: string; regime: string; confidence: string };
 type RegimeRow = { underlying: string; regime_label?: string; confidence_tier?: string; ecology_state?: any; dominant_horizon_hint?: string | null };
 type Brief = { brief_type: string; entries: any };
 type Ensemble = { underlying: string; ensemble_label: string; ensemble_confidence?: number; horizon_weights?: Record<string, number>; component_votes?: any; stability_metrics?: any };
+type PanelStatus = "idle" | "loading" | "success" | "error";
 
 function App() {
   const [sessionId, setSessionId] = useState<string>("");
@@ -27,6 +28,12 @@ function App() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [ensembles, setEnsembles] = useState<Ensemble[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [regimesStatus, setRegimesStatus] = useState<PanelStatus>("idle");
+  const [regimesError, setRegimesError] = useState<string>("");
+  const [briefsStatus, setBriefsStatus] = useState<PanelStatus>("idle");
+  const [briefsError, setBriefsError] = useState<string>("");
+  const [ensembleStatus, setEnsembleStatus] = useState<PanelStatus>("idle");
+  const [ensembleError, setEnsembleError] = useState<string>("");
 
   const loadLatestSession = useCallback(async () => {
     try {
@@ -48,12 +55,10 @@ function App() {
   }, [loadLatestSession]);
 
   useEffect(() => {
-    if (sessionId) {
-      loadRegimes();
-      loadBriefs();
-      loadEnsembles();
-    }
-  }, [sessionId]);
+    loadRegimes();
+    loadBriefs();
+    loadEnsembles();
+  }, [sessionId, loadRegimes, loadBriefs, loadEnsembles]);
 
   const createSession = useCallback(async () => {
     const form = new FormData();
@@ -74,27 +79,75 @@ function App() {
   }, [sessionDate, strategyMode]);
 
   const loadRegimes = useCallback(async () => {
-    if (!sessionId) return;
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/regimes`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setRegimes(data.regimes || []);
+    if (!sessionId) {
+      setRegimes([]);
+      setRegimesStatus("idle");
+      setRegimesError("");
+      return;
+    }
+    setRegimesStatus("loading");
+    setRegimesError("");
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/regimes`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch regimes");
+      }
+      const data = await res.json();
+      setRegimes(data.regimes || []);
+      setRegimesStatus("success");
+    } catch (e: any) {
+      setRegimes([]);
+      setRegimesStatus("error");
+      setRegimesError(e?.message || "Failed to fetch regimes");
+    }
   }, [sessionId]);
 
   const loadBriefs = useCallback(async () => {
-    if (!sessionId) return;
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/briefs`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setBriefs(data.briefs || []);
+    if (!sessionId) {
+      setBriefs([]);
+      setBriefsStatus("idle");
+      setBriefsError("");
+      return;
+    }
+    setBriefsStatus("loading");
+    setBriefsError("");
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/briefs`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch briefs");
+      }
+      const data = await res.json();
+      setBriefs(data.briefs || []);
+      setBriefsStatus("success");
+    } catch (e: any) {
+      setBriefs([]);
+      setBriefsStatus("error");
+      setBriefsError(e?.message || "Failed to fetch briefs");
+    }
   }, [sessionId]);
 
   const loadEnsembles = useCallback(async () => {
-    if (!sessionId) return;
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/ensemble`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setEnsembles(data.ensembles || []);
+    if (!sessionId) {
+      setEnsembles([]);
+      setEnsembleStatus("idle");
+      setEnsembleError("");
+      return;
+    }
+    setEnsembleStatus("loading");
+    setEnsembleError("");
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}/ensemble`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch ensembles");
+      }
+      const data = await res.json();
+      setEnsembles(data.ensembles || []);
+      setEnsembleStatus("success");
+    } catch (e: any) {
+      setEnsembles([]);
+      setEnsembleStatus("error");
+      setEnsembleError(e?.message || "Failed to fetch ensembles");
+    }
   }, [sessionId]);
 
   const compute = useCallback(async () => {
@@ -139,6 +192,8 @@ function App() {
       alert("Create a session first");
       return;
     }
+    setBriefsStatus("loading");
+    setBriefsError("");
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
@@ -146,8 +201,11 @@ function App() {
     if (res.ok) {
       const data = await res.json();
       setBriefs(data.briefs || []);
+      setBriefsStatus("success");
       setLogs((prev) => [`Generated briefs (${data.briefs?.length || 0})`, ...prev]);
     } else {
+      setBriefsStatus("error");
+      setBriefsError("Brief generation failed");
       alert("Brief generation failed");
     }
   }, [sessionDate, sessionId]);
@@ -157,6 +215,8 @@ function App() {
       alert("Create a session first");
       return;
     }
+    setEnsembleStatus("loading");
+    setEnsembleError("");
     const form = new FormData();
     form.append("session_id", sessionId);
     form.append("asof_date", sessionDate);
@@ -169,6 +229,8 @@ function App() {
       setLogs((prev) => [`Computed v1 ensemble (${data.ensembles?.length || 0})`, ...prev]);
       loadEnsembles();
     } else {
+      setEnsembleStatus("error");
+      setEnsembleError("v1 compute failed");
       alert("v1 compute failed");
     }
   }, [sessionDate, sessionId, loadEnsembles]);
@@ -195,6 +257,7 @@ function App() {
     });
     return map;
   }, [regimes]);
+  const hasSession = Boolean(sessionId);
 
   const handleSessionCreated = (id: string, date: string) => {
     setSessionId(id);
@@ -243,7 +306,13 @@ function App() {
         decisionTable={decisionTable}
       />
 
-      <ChartsPanel regimes={regimes} />
+      <RegimesPanel
+        regimes={regimes}
+        loading={regimesStatus === "loading"}
+        error={regimesStatus === "error" ? regimesError : ""}
+        onRetry={loadRegimes}
+        hasSession={hasSession}
+      />
 
       <AnomaliesPanel
         apiBase={API_BASE}
@@ -259,9 +328,28 @@ function App() {
         onLog={(msg) => setLogs((prev) => [msg, ...prev])}
       />
 
-      <DailyBriefsPanel briefs={briefs} regimeMap={regimeMap} />
-      <EcologyPanel entries={ecologyEntries} />
-      <EnsemblePanel ensembles={ensembles} />
+      <DailyBriefsPanel
+        briefs={briefs}
+        regimeMap={regimeMap}
+        loading={briefsStatus === "loading"}
+        error={briefsStatus === "error" ? briefsError : ""}
+        onRetry={loadBriefs}
+        hasSession={hasSession}
+      />
+      <EcologyPanel
+        entries={ecologyEntries}
+        loading={regimesStatus === "loading"}
+        error={regimesStatus === "error" ? regimesError : ""}
+        onRetry={loadRegimes}
+        hasSession={hasSession}
+      />
+      <EnsemblePanel
+        ensembles={ensembles}
+        loading={ensembleStatus === "loading"}
+        error={ensembleStatus === "error" ? ensembleError : ""}
+        onRetry={loadEnsembles}
+        hasSession={hasSession}
+      />
 
       <ManualOutcomeLabel apiBase={API_BASE} defaultDate={sessionDate} onSaved={(msg) => setLogs((prev) => [msg, ...prev])} />
 
