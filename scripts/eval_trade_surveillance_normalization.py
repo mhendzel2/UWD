@@ -59,9 +59,11 @@ def _make_labeled_synthetic_trades(
         "TSLA": 180.0,
     }
 
-    # Regime shift: later in time, normal sizes drift up across all symbols.
+    # Regime shift: later in time, normal sizes jump up across all symbols.
     t = np.linspace(0.0, 1.0, int(n_rows), dtype=float)
-    regime_mult = 1.0 + (0.8 * (t > 0.65)) if include_regime_shift else 1.0
+    regime_gate = (t > 0.65)
+    # Stronger jump makes this a more discriminative stress test.
+    regime_mult = (1.0 + 2.0 * regime_gate) if include_regime_shift else 1.0
 
     qty = np.empty(int(n_rows), dtype=float)
     for i in range(int(n_rows)):
@@ -109,6 +111,7 @@ def _make_labeled_synthetic_trades(
             "bid": bid,
             "ask": ask,
             "mid_price": mid,
+            "phase": np.where(regime_gate, "post_shift", "pre_shift"),
         }
     )
     return trades, y
@@ -144,6 +147,43 @@ def _ranking_metrics(y_true: pd.Series, score_series: pd.Series) -> dict[str, fl
     return out
 
 
+def _regime_metrics(
+    *,
+    y_true: pd.Series,
+    score_series: pd.Series,
+    phase: pd.Series,
+    top_frac: float = 0.01,
+) -> dict[str, float]:
+    y = pd.to_numeric(y_true, errors="coerce").fillna(0).astype(int).to_numpy()
+    s = pd.to_numeric(score_series, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    ph = phase.astype(str).to_numpy()
+
+    k = max(1, int(round(float(top_frac) * len(y))))
+    order = np.argsort(-s)
+    picked = np.zeros(len(y), dtype=bool)
+    picked[order[:k]] = True
+
+    out: dict[str, float] = {}
+    for label in ["pre_shift", "post_shift"]:
+        mask = ph == label
+        denom_normals = max(1, int(((y == 0) & mask).sum()))
+        denom_all = max(1, int(mask.sum()))
+
+        fp = int((picked & mask & (y == 0)).sum())
+        tp = int((picked & mask & (y == 1)).sum())
+
+        out[f"fpr_{label}"] = float(fp / denom_normals)
+        out[f"pick_rate_{label}"] = float(int((picked & mask).sum()) / denom_all)
+        out[f"tp_{label}"] = float(tp)
+
+    # Stability ratio: how much more we pick in post vs pre (lower is better here).
+    out["pick_rate_ratio_post_over_pre"] = float(
+        out["pick_rate_post_shift"] / max(1e-12, out["pick_rate_pre_shift"])
+    )
+    out["fpr_ratio_post_over_pre"] = float(out["fpr_post_shift"] / max(1e-12, out["fpr_pre_shift"]))
+    return out
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--work", default="tmp/ts_norm_eval", help="Working directory under repo root")
@@ -158,6 +198,7 @@ def main() -> int:
 
     # Either use existing demo generator (unlabeled) or a labeled synthetic dataset.
     y = None
+    labeled_trades: pd.DataFrame | None = None
     if bool(args.labeled):
         trades, y = _make_labeled_synthetic_trades(
             n_rows=int(args.n_trades),
@@ -165,6 +206,7 @@ def main() -> int:
             anomaly_rate=float(args.anomaly_rate),
             include_regime_shift=True,
         )
+        labeled_trades = trades
         trades_path = work / "trades_labeled.csv"
         trades.to_csv(trades_path, index=False)
         features_path = work / "features.parquet"
@@ -185,6 +227,12 @@ def main() -> int:
     base = pd.read_parquet(base_path)
     cross = pd.read_parquet(cross_path)
 
+    if labeled_trades is not None:
+        join_cols = ["timestamp", "symbol", "phase"]
+        key_cols = ["timestamp", "symbol"]
+        base = base.merge(labeled_trades[join_cols], on=key_cols, how="left")
+        cross = cross.merge(labeled_trades[join_cols], on=key_cols, how="left")
+
     if y is not None and "ensemble_score" in base.columns and "ensemble_score" in cross.columns:
         m_base = _ranking_metrics(y, base["ensemble_score"])
         m_cross = _ranking_metrics(y, cross["ensemble_score"])
@@ -201,6 +249,22 @@ def main() -> int:
         for k in keys:
             print(f"{k:>18s}  baseline={m_base.get(k, float('nan')):8.4f}   cross_norm={m_cross.get(k, float('nan')):8.4f}")
         print("")
+
+        if "phase" in base.columns and "phase" in cross.columns:
+            r_base = _regime_metrics(y_true=y, score_series=base["ensemble_score"], phase=base["phase"], top_frac=0.01)
+            r_cross = _regime_metrics(y_true=y, score_series=cross["ensemble_score"], phase=cross["phase"], top_frac=0.01)
+            print("=== Regime-aware stability (top 1% picks) ===")
+            keys2 = [
+                "fpr_pre_shift",
+                "fpr_post_shift",
+                "fpr_ratio_post_over_pre",
+                "pick_rate_pre_shift",
+                "pick_rate_post_shift",
+                "pick_rate_ratio_post_over_pre",
+            ]
+            for k in keys2:
+                print(f"{k:>28s}  baseline={r_base.get(k, float('nan')):10.4f}   cross_norm={r_cross.get(k, float('nan')):10.4f}")
+            print("")
 
     # Proxy metrics
     base_top = _top_share_by_symbol(base)
