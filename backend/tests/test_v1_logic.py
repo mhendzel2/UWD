@@ -84,9 +84,11 @@ def test_micro_classifiers_and_combine():
 
 
 def test_migration_revision_present():
-    path = "backend/app/db/migrations/versions/0002_v1_upgrade.py"
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
+    from pathlib import Path
+
+    backend_root = Path(__file__).resolve().parents[1]
+    path = backend_root / "app" / "db" / "migrations" / "versions" / "0002_v1_upgrade.py"
+    content = path.read_text(encoding="utf-8")
     assert "daily_briefs" in content
     assert "ensemble_decisions" in content
 

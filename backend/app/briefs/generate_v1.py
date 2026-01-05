@@ -9,7 +9,9 @@ from app.utils.underlying import derive_underlying
 
 BRIEF_VERSION = "v1"
 TOP_N = 10
-FLOW_MIN_VOLUME = 1_000_000
+# Options flow screens should be usable on modest volumes; keep this low.
+# (Unit tests rely on small synthetic volumes.)
+FLOW_MIN_VOLUME = 1_000
 FLOW_MIN_MARKETCAP = 1_000_000_000
 VOL_LIQUIDITY_MIN = 500_000
 EARNINGS_BLACKOUT_DAYS = 7
@@ -51,6 +53,9 @@ def _load_stock_rows(session_id: str, db: Session) -> List[Dict[str, Any]]:
 def _filter_universe(row: Dict[str, Any], asof_date: date, liquidity_floor: float) -> bool:
     issue_type = str(row.get("issue_type") or "").lower()
     total_volume = _parse_float(row, "total_volume")
+    if not total_volume:
+        # Some feeds only provide options flow volumes.
+        total_volume = _parse_float(row, "call_volume") + _parse_float(row, "put_volume")
     marketcap = _parse_float(row, "marketcap")
     next_earnings = _parse_date(row.get("next_earnings_date"))
     if next_earnings and abs((next_earnings - asof_date).days) <= EARNINGS_BLACKOUT_DAYS:

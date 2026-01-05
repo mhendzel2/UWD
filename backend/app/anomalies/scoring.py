@@ -83,7 +83,7 @@ def _feature_labels(source: models.RawSource) -> Dict[str, str]:
         return {
             "oi_diff_plain": "OI change (contracts)",
             "oi_change": "OI change %",
-            "volume": "Trade volume",
+            "volume": "Volume",
             "trades": "Trades count",
             "percentage_of_total": "% of chain",
             "curr_oi": "Current OI",
