@@ -5,9 +5,17 @@
   --border: #1f2937;
   --text: #e5e7eb;
   --muted: #94a3b8;
+  --heading: #f8fafc;
   --accent: #38bdf8;
   --accent-2: #a855f7;
+  --chip: #1e293b;
   --radius: 10px;
+  --radius-lg: 14px;
+  --status-success: #16a34a;
+  --status-warning: #f59e0b;
+  --status-danger: #f43f5e;
+  --status-info: #38bdf8;
+  --status-neutral: #94a3b8;
 }
 
 * {
