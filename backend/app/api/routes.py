@@ -155,7 +155,25 @@ def import_local_options_flow(payload: Dict[str, Any], db: Session = Depends(get
 
 def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, Dict[str, float]]]:
     per_underlying: Dict[str, Dict[str, Dict[str, float]]] = {}
-    files = db.query(models.RawFile).filter(models.RawFile.session_id == session_id).all()
+    # Users may import the same CSV multiple times (e.g., reruns, retries). To keep
+    # aggregation stable and avoid double-counting, only consider the most recent
+    # import for each (source, filename) pair.
+    files = (
+        db.query(models.RawFile)
+        .filter(models.RawFile.session_id == session_id, models.RawFile.parse_status == models.ParseStatus.OK)
+        .order_by(models.RawFile.imported_at.desc())
+        .all()
+    )
+    seen: set[tuple[models.RawSource, str]] = set()
+    deduped: list[models.RawFile] = []
+    for rf in files:
+        key = (rf.source, rf.filename)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(rf)
+
+    files = deduped
     for rf in files:
         if not rf.extras:
             continue
