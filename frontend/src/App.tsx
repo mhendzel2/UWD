@@ -291,7 +291,7 @@ function App() {
       loadEnsembles(true);
       fetchCapabilities(sessionId);
     }
-  }, [fetchCapabilities, loadBriefs, loadEnsembles, loadRegimes, sessionId]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
