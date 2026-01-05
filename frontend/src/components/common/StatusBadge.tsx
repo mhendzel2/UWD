@@ -9,9 +9,10 @@ type StatusBadgeProps = {
 };
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({ tone = "neutral", label, subdued = false }) => {
+  const toneClass = styles[tone] || styles.neutral;
   const badgeClasses = [
     styles.badge,
-    styles[tone],
+    toneClass,
     subdued ? styles.subdued : styles.normal,
   ].join(" ");
 
