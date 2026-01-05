@@ -68,6 +68,7 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
               fill="#8884d8"
               dataKey="value"
               onClick={handlePieClick}
+              aria-label="Click to drill down into regime details"
             >
               {regimeDistribution.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
