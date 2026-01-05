@@ -9,6 +9,14 @@ from trade_surveillance.io import read_quotes, read_trades, write_parquet
 
 
 @dataclass(frozen=True)
+class ScoreConfig:
+    random_state: int = 7
+    # If the dataset is huge, optionally subsample for fitting.
+    max_fit_rows: int = 200_000
+    pca_components: int = 5
+
+
+@dataclass(frozen=True)
 class FeaturizeConfig:
     # Minimum group size for the most granular context normalization.
     min_group_size: int = 50
@@ -257,4 +265,135 @@ def featurize(*, trades_path: str, quotes_path: str | None, out_path: str) -> No
 
 
 def score(*, features_path: str, out_path: str) -> None:
-    raise NotImplementedError("Phase 4: detectors + ensemble")
+    from sklearn.covariance import MinCovDet
+    from sklearn.decomposition import PCA
+    from sklearn.ensemble import IsolationForest
+
+    cfg = ScoreConfig()
+    df = pd.read_parquet(features_path)
+    if df.empty:
+        raise ValueError("features is empty")
+
+    # Select a stable feature set (context-normalized z-scores).
+    feature_cols = [
+        "qty_z_s",
+        "notional_z_s",
+        "signed_qty_z_s",
+        "spread_bps_z_s",
+        "price_vs_mid_bps_z_s",
+        "effective_spread_bps_z_s",
+        "gap_s_symbol_z_s",
+    ]
+    feature_cols = [c for c in feature_cols if c in df.columns]
+    if not feature_cols:
+        raise ValueError("No usable feature columns found (expected *_z_s columns)")
+
+    X = df[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    n = X.shape[0]
+
+    # Fit set (may subsample for speed).
+    fit_idx = np.arange(n)
+    if n > int(cfg.max_fit_rows):
+        rng = np.random.default_rng(int(cfg.random_state))
+        fit_idx = rng.choice(fit_idx, size=int(cfg.max_fit_rows), replace=False)
+        fit_idx.sort()
+
+    X_fit = X[fit_idx]
+
+    out = df[[c for c in ["timestamp", "symbol", "venue", "trader_id", "side", "price", "qty", "notional"] if c in df.columns]].copy()
+
+    # 1) Robust Mahalanobis via MCD
+    try:
+        mcd = MinCovDet(random_state=int(cfg.random_state)).fit(X_fit)
+        mah = mcd.mahalanobis(X)
+    except Exception:
+        # Fallback: use standard covariance if MCD fails
+        mu = X_fit.mean(axis=0)
+        cov = np.cov(X_fit.T)
+        cov += np.eye(cov.shape[0]) * 1e-6
+        inv = np.linalg.pinv(cov)
+        d = X - mu
+        mah = np.einsum("ij,jk,ik->i", d, inv, d)
+    out["score_mcd_mahal"] = pd.Series(mah, dtype=float)
+
+    # 2) IsolationForest
+    iso = IsolationForest(
+        n_estimators=300,
+        random_state=int(cfg.random_state),
+        n_jobs=-1,
+        contamination="auto",
+    ).fit(X_fit)
+    # decision_function: higher is more normal. Convert to anomaly score.
+    out["score_isoforest"] = (-iso.decision_function(X)).astype(float)
+
+    # 3) PCA T^2 and SPE
+    k = min(int(cfg.pca_components), X_fit.shape[1])
+    if k >= 1:
+        pca = PCA(n_components=k, random_state=int(cfg.random_state)).fit(X_fit)
+        scores = pca.transform(X)
+        recon = pca.inverse_transform(scores)
+        resid = X - recon
+        spe = np.sum(resid**2, axis=1)
+        # T^2 = sum (score_i^2 / eigenvalue_i)
+        ev = pca.explained_variance_.astype(float)
+        ev = np.where(ev <= 1e-12, 1e-12, ev)
+        t2 = np.sum((scores**2) / ev, axis=1)
+    else:
+        spe = np.zeros(n, dtype=float)
+        t2 = np.zeros(n, dtype=float)
+    out["score_pca_spe"] = pd.Series(spe, dtype=float)
+    out["score_pca_t2"] = pd.Series(t2, dtype=float)
+
+    # 4) Change-point proxy: big deltas in selected z-features within symbol
+    if "symbol" in df.columns and "timestamp" in df.columns:
+        tmp = df[["symbol", "timestamp"] + feature_cols].copy()
+        tmp["timestamp"] = pd.to_datetime(tmp["timestamp"], utc=True, errors="coerce")
+        tmp = tmp.dropna(subset=["timestamp"]).sort_values(["symbol", "timestamp"]).reset_index()
+        deltas = []
+        for c in [c for c in feature_cols if c in tmp.columns]:
+            deltas.append(tmp.groupby("symbol")[c].diff().abs().fillna(0.0).to_numpy())
+        if deltas:
+            cp = np.sum(np.vstack(deltas), axis=0)
+        else:
+            cp = np.zeros(len(tmp), dtype=float)
+        tmp["score_changepoint"] = cp
+        # Map back to original row order via the stored original index
+        out = out.merge(tmp[["index", "score_changepoint"]], left_index=True, right_on="index", how="left")
+        out = out.drop(columns=["index"])  # from merge
+        out["score_changepoint"] = pd.to_numeric(out["score_changepoint"], errors="coerce").fillna(0.0)
+    else:
+        out["score_changepoint"] = 0.0
+
+    score_cols = [c for c in out.columns if c.startswith("score_")]
+
+    # Percentile-normalize each method score for ensembling.
+    for c in score_cols:
+        out[f"pct_{c}"] = out[c].rank(pct=True, method="average")
+
+    pct_cols = [f"pct_{c}" for c in score_cols]
+    out["ensemble_score"] = out[pct_cols].mean(axis=1)
+    out["ensemble_pct"] = out["ensemble_score"].rank(pct=True, method="average")
+
+    # Reason codes: top method(s) + top abs feature z(s)
+    # Keep it compact, single string column.
+    pct_mat = out[pct_cols].to_numpy(dtype=float)
+    top_method_idx = np.argsort(-pct_mat, axis=1)[:, :2]
+    method_names = np.array([c.removeprefix("pct_") for c in pct_cols], dtype=object)
+    top_methods = ["/".join(method_names[row]) for row in top_method_idx]
+
+    z_cols_for_reason = [c for c in feature_cols if c.endswith("_z_s")]
+    Z = df[z_cols_for_reason].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    top_feat_idx = np.argsort(-np.abs(Z), axis=1)[:, :2]
+    feat_names = np.array(z_cols_for_reason, dtype=object)
+    feat_parts = []
+    for i in range(n):
+        parts = []
+        for j in top_feat_idx[i]:
+            name = str(feat_names[j])
+            val = float(Z[i, j])
+            parts.append(f"{name}={val:.2f}")
+        feat_parts.append(",".join(parts))
+
+    out["reason"] = [f"{m}; {fp}" for m, fp in zip(top_methods, feat_parts)]
+
+    write_parquet(out, out_path)
