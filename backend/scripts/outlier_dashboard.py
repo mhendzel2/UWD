@@ -146,6 +146,93 @@ def _run_outlier_report_for_range(*, start: date, end: date, baseline_days: int,
     return int(p.returncode or 0), out.strip()
 
 
+def _run_load_outlier_reports_to_db(
+    *,
+    events_csv: str,
+    summary_csv: str,
+    schema: str | None,
+    events_table: str,
+    summary_table: str,
+    if_exists: str,
+) -> tuple[int, str]:
+    db_url = _require_db_url()
+    if not db_url:
+        return 2, "UW_DATABASE_URL is not set; cannot load reports into DB."
+
+    root = _repo_backend_root()
+    script = root / "scripts" / "load_outlier_reports_to_db.py"
+    cmd = [
+        sys.executable,
+        "-u",
+        str(script),
+        "--events-csv",
+        str(events_csv),
+        "--summary-csv",
+        str(summary_csv),
+        "--events-table",
+        str(events_table),
+        "--summary-table",
+        str(summary_table),
+        "--if-exists",
+        str(if_exists),
+    ]
+    if schema:
+        cmd += ["--schema", str(schema)]
+
+    env = dict(os.environ)
+    env["UW_DATABASE_URL"] = db_url
+
+    try:
+        p = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
+    except Exception as e:
+        return 2, f"Failed to load reports into DB: {e}"
+
+    out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
+    return int(p.returncode or 0), out.strip()
+
+
+def _run_backfill_outlier_outcomes(
+    *,
+    events_csv: str,
+    win_threshold: float,
+    loss_threshold: float,
+    horizon: int,
+    lookback_days: int,
+) -> tuple[int, str]:
+    db_url = _require_db_url()
+    if not db_url:
+        return 2, "UW_DATABASE_URL is not set; cannot backfill outcomes."
+
+    root = _repo_backend_root()
+    script = root / "scripts" / "backfill_outlier_outcomes.py"
+    cmd = [
+        sys.executable,
+        "-u",
+        str(script),
+        "--events-csv",
+        str(events_csv),
+        "--win-threshold",
+        str(float(win_threshold)),
+        "--loss-threshold",
+        str(float(loss_threshold)),
+        "--horizon",
+        str(int(horizon)),
+        "--lookback-days",
+        str(int(lookback_days)),
+    ]
+
+    env = dict(os.environ)
+    env["UW_DATABASE_URL"] = db_url
+
+    try:
+        p = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True)
+    except Exception as e:
+        return 2, f"Failed to backfill outcomes: {e}"
+
+    out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
+    return int(p.returncode or 0), out.strip()
+
+
 def _snip_log(text: str, max_chars: int = 8000) -> str:
     if not text:
         return ""
@@ -642,6 +729,19 @@ def main() -> None:
         st.header("Data")
         source = st.radio("Data source", ["CSV outputs", "Postgres tables"], index=0)
 
+        st.subheader("DB analyses")
+        st.caption("Optional: load reports into DB and backfill outcomes/stats.")
+        db_events_table = st.text_input("DB events table", value="report_outlier_events")
+        db_summary_table = st.text_input("DB summary table", value="report_outlier_summary")
+        db_schema = st.text_input("DB schema (optional)", value="")
+        db_if_exists = st.selectbox("DB write mode", ["replace", "append"], index=0)
+
+        st.markdown("**Outcomes backfill**")
+        out_horizon = st.selectbox("Outcome horizon (trading days)", [1, 5, 20], index=1)
+        out_win = st.number_input("Win threshold (return)", value=0.05, step=0.01, format="%.3f")
+        out_loss = st.number_input("Loss threshold (return)", value=-0.05, step=0.01, format="%.3f")
+        out_lookback = st.number_input("Stats lookback days", value=90, min_value=1, step=1)
+
         st.subheader("Latest")
         auto_latest = st.checkbox("Auto-analyze latest date", value=True)
 
@@ -704,6 +804,42 @@ def main() -> None:
                 _load_events_csv.clear()
                 _load_summary_csv.clear()
 
+            cdb1, cdb2 = st.columns(2)
+            with cdb1:
+                if st.button("Load reports -> DB"):
+                    with st.spinner("Loading reports into Postgres..."):
+                        rc, out = _run_load_outlier_reports_to_db(
+                            events_csv=events_path,
+                            summary_csv=summary_path,
+                            schema=(db_schema.strip() or None),
+                            events_table=db_events_table.strip() or "report_outlier_events",
+                            summary_table=db_summary_table.strip() or "report_outlier_summary",
+                            if_exists=db_if_exists,
+                        )
+                    st.caption("DB load log")
+                    st.code(_snip_log(out) or "(no output)")
+                    if rc != 0:
+                        st.error("DB load failed. Check log above.")
+                    else:
+                        st.success("Reports loaded to DB.")
+
+            with cdb2:
+                if st.button("Backfill outcomes"):
+                    with st.spinner("Backfilling outcomes + stats..."):
+                        rc, out = _run_backfill_outlier_outcomes(
+                            events_csv=events_path,
+                            win_threshold=float(out_win),
+                            loss_threshold=float(out_loss),
+                            horizon=int(out_horizon),
+                            lookback_days=int(out_lookback),
+                        )
+                    st.caption("Outcomes log")
+                    st.code(_snip_log(out) or "(no output)")
+                    if rc != 0:
+                        st.error("Outcomes backfill failed. Check log above.")
+                    else:
+                        st.success("Outcomes backfilled.")
+
             # If we have a DB and the latest session isn't reflected in the CSV yet,
             # automatically recompute just the latest day.
             latest_db_date = _latest_session_date_from_db() if auto_latest and _require_db_url() else None
@@ -744,10 +880,9 @@ def main() -> None:
                 df_sum = pd.DataFrame()
 
         else:
-            schema = st.text_input("Schema (optional)", value="")
-            schema_val = schema.strip() or None
-            events_table = st.text_input("Events table", value="report_outlier_events")
-            summary_table = st.text_input("Summary table", value="report_outlier_summary")
+            schema_val = db_schema.strip() or None
+            events_table = db_events_table.strip() or "report_outlier_events"
+            summary_table = db_summary_table.strip() or "report_outlier_summary"
             if st.button("Reload data"):
                 _load_events_from_db.clear()
                 _load_summary_from_db.clear()
@@ -849,6 +984,16 @@ def main() -> None:
         horizon = st.selectbox("Forward return horizon", [1, 5, 20], index=1)
         ret_col = f"ret_{horizon}"
 
+        high_stringency = st.checkbox("High stringency only", value=True)
+        high_stringency_pct = st.number_input(
+            "High stringency percentile (per method)",
+            value=0.90,
+            min_value=0.50,
+            max_value=0.99,
+            step=0.01,
+            format="%.2f",
+        )
+
         min_abs_score = st.number_input("Min |score|", value=0.0, min_value=0.0, step=1.0)
         min_abs_oi = st.number_input("Min |oi_diff|", value=0.0, min_value=0.0, step=1000.0)
         require_return = st.checkbox("Only rows with return", value=True)
@@ -877,6 +1022,22 @@ def main() -> None:
 
     if require_return and ret_col in f.columns:
         f = f[f[ret_col].notna()]
+
+    if high_stringency and "score" in f.columns and "method" in f.columns and f.shape[0] > 0:
+        try:
+            score_abs = f["score"].abs()
+            f = f.assign(_abs_score=score_abs)
+            q = (
+                f.groupby("method", dropna=False)["_abs_score"]
+                .quantile(float(high_stringency_pct))
+                .to_dict()
+            )
+            thr = f["method"].map(q).fillna(0.0).astype(float)
+            f = f[f["_abs_score"].astype(float) >= thr]
+            f = f.drop(columns=["_abs_score"], errors="ignore")
+        except Exception:
+            # If percentile computation fails for any reason, fall back to unfiltered.
+            f = f.drop(columns=["_abs_score"], errors="ignore")
 
     # KPIs
     c1, c2, c3, c4 = st.columns(4)

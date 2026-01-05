@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -192,7 +192,7 @@ def backfill_outcomes(
             if existing:
                 for key, value in payload.items():
                     setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
                 updated += 1
             else:
                 outcome = models.OutlierOutcome(
@@ -267,6 +267,14 @@ def compute_method_stats(
         for agg_config in aggregations:
             groupby_cols = agg_config["groupby"]
             grouped = df.groupby(groupby_cols, dropna=False)
+
+            def _none_if_na(v: Any) -> Any:
+                try:
+                    if v is None or pd.isna(v):
+                        return None
+                except Exception:
+                    pass
+                return v
             
             for group_key, group_df in grouped:
                 if not isinstance(group_key, tuple):
@@ -278,14 +286,14 @@ def compute_method_stats(
                 
                 if len(groupby_cols) == 2:
                     if "underlying_symbol" in groupby_cols:
-                        underlying = group_key[1]
+                        underlying = _none_if_na(group_key[1] if len(group_key) > 1 else None)
                     elif "sector" in groupby_cols:
-                        sector = group_key[1]
+                        sector = _none_if_na(group_key[1] if len(group_key) > 1 else None)
                 
-                total = len(group_df)
-                win_count = (group_df["outcome_label"] == "WIN").sum()
-                loss_count = (group_df["outcome_label"] == "LOSS").sum()
-                neutral_count = (group_df["outcome_label"] == "NEUTRAL").sum()
+                total = int(len(group_df))
+                win_count = int((group_df["outcome_label"] == "WIN").sum())
+                loss_count = int((group_df["outcome_label"] == "LOSS").sum())
+                neutral_count = int((group_df["outcome_label"] == "NEUTRAL").sum())
                 
                 returns = group_df["return_5d"].dropna()
                 avg_return = returns.mean() if len(returns) > 0 else None
@@ -347,7 +355,7 @@ def compute_method_stats(
                     "worst_return": Decimal(str(worst_return)) if worst_return is not None else None,
                     "recommended_score_threshold": Decimal(str(recommended_threshold)) if recommended_threshold is not None else None,
                     "as_of_date": as_of_date,
-                    "computed_at": datetime.utcnow(),
+                    "computed_at": datetime.now(timezone.utc),
                 }
                 
                 if existing:
