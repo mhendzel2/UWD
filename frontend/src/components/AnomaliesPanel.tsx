@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import "./AnomaliesPanel.css";
+import LoadingState from "./common/LoadingState";
+import ErrorState from "./common/ErrorState";
+import EmptyState from "./common/EmptyState";
+import StatusBadge from "./common/StatusBadge";
 
 type Props = {
   apiBase: string;
@@ -46,11 +50,16 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
   const [events, setEvents] = useState<AnomalyEvent[]>([]);
   const [rollups, setRollups] = useState<Rollup[]>([]);
   const [selected, setSelected] = useState<AnomalyEvent | null>(null);
+  const [fetching, setFetching] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [displayLimit, setDisplayLimit] = useState<number>(300);
 
   const fetchAnomalies = useCallback(async () => {
     if (!sessionId) return;
+    setFetching(true);
+    setError("");
     const params = new URLSearchParams();
     if (tickerFilter) params.append("ticker", tickerFilter.trim().toUpperCase());
     if (sourceFilter !== "ALL") params.append("source", sourceFilter);
@@ -65,13 +74,18 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       const json = await res.json();
       setEvents(json.events || []);
       setRollups(json.rollups || []);
+      setDisplayLimit(300);
       if (json.events && json.events.length > 0) {
         setSelected(json.events[0]);
       }
+      setLastUpdated(Date.now());
+      onLog?.(`Anomalies refreshed (${json.events?.length || 0} events)`);
     } catch (e: any) {
       setError(e?.message || "Failed to load anomalies");
+    } finally {
+      setFetching(false);
     }
-  }, [apiBase, minScore, sessionId, sourceFilter, tickerFilter]);
+  }, [apiBase, minScore, onLog, sessionId, sourceFilter, tickerFilter]);
 
   useEffect(() => {
     fetchAnomalies();
@@ -97,6 +111,8 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       setEvents(json.events || []);
       setRollups(json.rollups || []);
       setSelected(json.events?.[0] ?? null);
+      setDisplayLimit(300);
+      setLastUpdated(Date.now());
       onLog?.(`Anomalies computed (${json.summary?.total_events || 0} events)`);
     } catch (e: any) {
       setError(e?.message || "Compute failed");
@@ -131,6 +147,10 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       .slice(0, 8);
   }, [selected]);
 
+  const visibleEvents = useMemo(() => events.slice(0, displayLimit), [displayLimit, events]);
+  const isTruncated = events.length > displayLimit;
+  const isHeavyDataset = events.length > 500;
+
   return (
     <section className="anomalyPanel">
       <div className="anomalyHeader">
@@ -149,11 +169,11 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
       <div className="controlGrid">
         <label className="control">
           Ticker
-          <input value={tickerFilter} onChange={(e) => setTickerFilter(e.target.value)} placeholder="SPY" />
+          <input value={tickerFilter} onChange={(e) => setTickerFilter(e.target.value)} placeholder="SPY" aria-label="Ticker filter" />
         </label>
         <label className="control">
           Source
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} aria-label="Source filter">
             {sources.map((s) => (
               <option key={s} value={s}>
                 {s === "ALL" ? "All sources" : s}
@@ -163,7 +183,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
         </label>
         <label className="control">
           Min severity
-          <input value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.3" />
+          <input value={minScore} onChange={(e) => setMinScore(e.target.value)} placeholder="0.3" aria-label="Minimum severity score" />
         </label>
         <div className="control actions">
           <button onClick={fetchAnomalies} className="ghost">
@@ -175,7 +195,14 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <StatusBadge tone={loading || fetching ? "info" : "success"} label={loading ? "Computing" : "Live"} />
+        {lastUpdated && <span className="subtitle">Updated {new Date(lastUpdated).toLocaleTimeString()}</span>}
+        {isHeavyDataset && <StatusBadge tone="warning" label="Large dataset - narrow filters" subdued />}
+      </div>
+
+      {error && <ErrorState message={error} onRetry={fetchAnomalies} />}
+      {(fetching || loading) && <LoadingState label={loading ? "Computing anomalies…" : "Refreshing anomalies…"} />}
 
       <div className="summaryRow">
         {Object.entries(summary).map(([src, count]) => (
@@ -206,7 +233,7 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
             </tr>
           </thead>
           <tbody>
-            {events.map((ev) => (
+            {visibleEvents.map((ev) => (
               <tr
                 key={`${ev.event_key}-${ev.source}`}
                 className={selected?.event_key === ev.event_key ? "selectedRow" : ""}
@@ -228,7 +255,29 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
             ))}
           </tbody>
         </table>
-        {!events.length && <div className="empty">No anomalies found for this filter.</div>}
+        {!events.length && !fetching && !loading && (
+          <EmptyState
+            title="No anomalies found"
+            description="Broaden your filters or compute anomalies for this session."
+            action={
+              <button onClick={computeAnomalies} disabled={!sessionId}>
+                Compute anomalies
+              </button>
+            }
+          />
+        )}
+        {isTruncated && (
+          <div className="summaryRow" style={{ marginTop: 8 }}>
+            <div className="pill highlight">
+              <div className="pillLabel">Performance guard</div>
+              <div className="pillValue">
+                Showing {visibleEvents.length} / {events.length}
+              </div>
+              <div className="pillHint">Use filters or load all</div>
+            </div>
+            <button onClick={() => setDisplayLimit(events.length)}>Show all</button>
+          </div>
+        )}
       </div>
 
       {selected && (

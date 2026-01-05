@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -26,6 +26,8 @@ type Props = {
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8"];
 
 const ChartsPanel: React.FC<Props> = ({ regimes }) => {
+  const [focusedRegime, setFocusedRegime] = useState<string | null>(null);
+
   const regimeDistribution = useMemo(() => {
     const counts: Record<string, number> = {};
     regimes.forEach((r) => {
@@ -44,6 +46,10 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [regimes]);
 
+  const handlePieClick = (data: any) => {
+    setFocusedRegime(data?.name || null);
+  };
+
   if (regimes.length === 0) return null;
 
   return (
@@ -61,6 +67,7 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
               outerRadius={80}
               fill="#8884d8"
               dataKey="value"
+              onClick={handlePieClick}
             >
               {regimeDistribution.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -84,6 +91,15 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      {focusedRegime && (
+        <div style={{ minWidth: 240, border: "1px solid #eee", padding: "10px", borderRadius: 8 }}>
+          <h4>Regime Drill-down</h4>
+          <p style={{ marginTop: 4 }}>
+            {focusedRegime}: {regimeDistribution.find((r) => r.name === focusedRegime)?.value ?? 0} underlyings
+          </p>
+          <p style={{ color: "#64748b" }}>Click another slice or legend item to update this context.</p>
+        </div>
+      )}
     </div>
   );
 };

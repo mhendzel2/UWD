@@ -1,14 +1,25 @@
 import React, { useMemo, useState } from "react";
+import SectionHeader from "./common/SectionHeader";
+import StatusBadge from "./common/StatusBadge";
+import EmptyState from "./common/EmptyState";
+import { tokens } from "../theme";
 
 type BriefEntry = Record<string, any>;
 type Brief = {
   brief_type: string;
-  entries: { items?: any; note?: string } | any;
+  entries: { items?: any; note?: string; status?: string; updated_at?: string } | any;
+  status?: string;
+  updated_at?: string;
 };
 
 type Props = {
   briefs: Brief[];
   regimeMap?: Record<string, string>;
+  status?: {
+    status: "idle" | "loading" | "success" | "error";
+    error?: string;
+    updatedAt?: number;
+  };
 };
 
 const tabs = [
@@ -17,7 +28,7 @@ const tabs = [
   { key: "VOL_BUY_PREMIUM", label: "Low IV Buy Premium" },
 ];
 
-const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
+const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {}, status }) => {
   const [active, setActive] = useState<string>(tabs[0].key);
 
   const activeBrief = useMemo(() => briefs.find((b) => b.brief_type === active), [briefs, active]);
@@ -96,31 +107,51 @@ const DailyBriefsPanel: React.FC<Props> = ({ briefs, regimeMap = {} }) => {
     </table>
   );
 
+  const renderLifecycle = (brief?: Brief) => {
+    const label = brief?.status || brief?.entries?.status || "unknown";
+    const updated = brief?.updated_at || brief?.entries?.updated_at;
+    const tone = label === "published" || label === "complete" ? "success" : label === "draft" ? "warning" : "neutral";
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <StatusBadge tone={tone} label={`Status: ${label}`} subdued />
+        {updated && <span style={{ color: tokens.colors.muted, fontSize: 12 }}>Updated {new Date(updated).toLocaleString()}</span>}
+      </div>
+    );
+  };
+
   const renderContent = () => {
-    if (!activeBrief) return <p>No brief loaded.</p>;
+    if (!activeBrief) return <EmptyState title="No brief loaded" description="Generate briefs to view content." />;
     if (activeBrief.brief_type === "FLOW_SHORT_TERM") {
       return (
         <>
+          {renderLifecycle(activeBrief)}
           <h4>Bullish</h4>
           {renderFlowTable(flowItems.bullish)}
           <h4 style={{ marginTop: 12 }}>Bearish</h4>
           {flowItems.bearish.length ? renderFlowTable(flowItems.bearish) : <p>No bearish candidates (filtered out).</p>}
-          {activeBrief.entries?.note && <p style={{ color: "#555" }}>{activeBrief.entries.note}</p>}
+          {activeBrief.entries?.note && <p style={{ color: tokens.colors.muted }}>{activeBrief.entries.note}</p>}
         </>
       );
     }
     const items = (activeBrief.entries?.items as BriefEntry[]) || (activeBrief.entries as BriefEntry[]) || [];
     return (
       <>
+        {renderLifecycle(activeBrief)}
         {renderVolTable(items)}
-        {activeBrief.entries?.note && <p style={{ color: "#555" }}>{activeBrief.entries.note}</p>}
+        {activeBrief.entries?.note && <p style={{ color: tokens.colors.muted }}>{activeBrief.entries.note}</p>}
       </>
     );
   };
 
   return (
-    <section style={{ border: "1px solid #ccc", padding: 12 }}>
-      <h3>Daily Briefs</h3>
+    <section className="panel" aria-label="Daily briefs">
+      <SectionHeader
+        title="Daily Briefs"
+        eyebrow="Lifecycle"
+        statusLabel={status?.status || "idle"}
+        statusTone={status?.status === "error" ? "danger" : status?.status === "success" ? "success" : "info"}
+        updatedAt={status?.updatedAt}
+      />
       <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
         {tabs.map((tab) => (
           <button key={tab.key} onClick={() => setActive(tab.key)} disabled={active === tab.key}>

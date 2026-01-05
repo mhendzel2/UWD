@@ -72,11 +72,11 @@ const UploadDataset: React.FC<Props> = ({ apiBase, sessionId, onSessionCreated, 
   };
 
   return (
-    <section style={{ border: "1px solid #ccc", padding: 12 }}>
+    <section className="panel" aria-label="Dataset upload">
       <h3>Upload Dataset</h3>
       <label>
         Source
-        <select value={source} onChange={(e) => setSource(e.target.value)}>
+        <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Dataset source">
           {sources.map((s) => (
             <option key={s} value={s}>
               {s}
@@ -84,8 +84,10 @@ const UploadDataset: React.FC<Props> = ({ apiBase, sessionId, onSessionCreated, 
           ))}
         </select>
       </label>
-      <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-      <button onClick={submit}>Upload</button>
+      <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} aria-label="Upload CSV file" />
+      <button onClick={submit} aria-label="Upload dataset">
+        Upload
+      </button>
     </section>
   );
 };

@@ -28,18 +28,25 @@ const ManualOutcomeLabel: React.FC<Props> = ({ apiBase, defaultDate, onSaved }) 
   };
 
   return (
-    <section style={{ border: "1px solid #ccc", padding: 12 }}>
+    <section className="panel" aria-label="Manual outcome label">
       <h3>Manual Outcome Label</h3>
       <div style={{ display: "grid", gap: 6, maxWidth: 360 }}>
-        <input placeholder="Trade Date" value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} />
-        <input placeholder="Underlying (e.g., SPX)" value={underlying} onChange={(e) => setUnderlying(e.target.value)} />
-        <select value={label} onChange={(e) => setLabel(e.target.value)}>
+        <input placeholder="Trade Date" value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} aria-label="Trade date" />
+        <input
+          placeholder="Underlying (e.g., SPX)"
+          value={underlying}
+          onChange={(e) => setUnderlying(e.target.value)}
+          aria-label="Underlying ticker"
+        />
+        <select value={label} onChange={(e) => setLabel(e.target.value)} aria-label="Outcome label">
           <option value="PIN_RANGE">PIN_RANGE</option>
           <option value="TREND">TREND</option>
           <option value="MIXED">MIXED</option>
         </select>
-        <textarea placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        <button onClick={submit}>Save Outcome</button>
+        <textarea placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="Notes" />
+        <button onClick={submit} aria-label="Save outcome">
+          Save Outcome
+        </button>
       </div>
     </section>
   );
