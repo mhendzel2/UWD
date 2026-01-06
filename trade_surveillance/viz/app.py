@@ -120,7 +120,9 @@ def run(*, scores_path: str) -> None:
     st.set_page_config(page_title="Trade Surveillance", layout="wide")
     st.title("Unusual Trade Detection")
 
-    p = Path(scores_path)
+    # Defensive: batch/PowerShell launchers can accidentally pass a literal quote.
+    cleaned = str(scores_path).strip().strip('"').strip("'")
+    p = Path(cleaned)
     if not p.exists():
         alt = None
         # Common Windows/PowerShell pitfall: running generate/featurize/score from `backend/`
@@ -177,10 +179,22 @@ def run(*, scores_path: str) -> None:
         pct_label = st.selectbox("Percentile basis", options=[o[0] for o in pct_options], index=0)
         pct_col = dict(pct_options)[pct_label]
 
-        default_cut = 0.99
+        default_cut = 0.995
         min_pct = st.slider(f"Minimum percentile ({pct_col})", 0.0, 1.0, float(default_cut), 0.005)
         max_rows = st.number_input("Max rows", min_value=50, max_value=5000, value=500, step=50)
         show_all_cols = st.checkbox("Show all columns", value=False)
+
+        st.divider()
+        st.caption("Bias control")
+        cap_per_symbol_day = st.checkbox("Cap alerts per symbol/day", value=True)
+        max_per_symbol_day = st.number_input(
+            "Max alerts per symbol/day",
+            min_value=1,
+            max_value=500,
+            value=5,
+            step=1,
+            disabled=not cap_per_symbol_day,
+        )
 
         st.divider()
         st.caption("Normalization (cross-symbol scale)")
@@ -192,6 +206,27 @@ def run(*, scores_path: str) -> None:
         df = _add_normalized_columns(df, lookback=int(lookback), min_periods=int(min_periods))
 
     filtered = df[pd.to_numeric(df.get(pct_col), errors="coerce").fillna(0.0) >= float(min_pct)].copy()
+
+    # Cap per-symbol per-day so high-volume symbols don't dominate just due to trade count.
+    if cap_per_symbol_day and "timestamp" in filtered.columns and "symbol" in filtered.columns:
+        try:
+            t = pd.to_datetime(filtered["timestamp"], utc=True, errors="coerce")
+            # Use a stable session date convention (same as performance module).
+            try:
+                t = t.dt.tz_convert("America/New_York")
+            except Exception:
+                pass
+            filtered = filtered.assign(_session_date=t.dt.date)
+            filtered = filtered.sort_values(["_session_date", "symbol", pct_col], ascending=[True, True, False])
+            filtered = (
+                filtered.groupby(["_session_date", "symbol"], dropna=False, sort=False)
+                .head(int(max_per_symbol_day))
+                .copy()
+            )
+        except Exception:
+            # If timestamps are malformed, fall back to uncapped.
+            pass
+
     filtered = filtered.sort_values("ensemble_pct", ascending=False)
 
     with right:

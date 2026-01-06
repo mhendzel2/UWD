@@ -157,6 +157,53 @@ def select_all_above_percentile_per_day(
     return s
 
 
+def select_top_n_per_symbol_per_day(
+    scores: pd.DataFrame,
+    *,
+    n_per_symbol: int,
+    tz: str,
+    rank_col: str = "ensemble_pct",
+) -> pd.DataFrame:
+    """Select up to N signals per symbol per session day.
+
+    This normalizes for trade-count differences: liquid symbols (e.g., SPY)
+    won't produce far more alerts just because there are more rows.
+    """
+    if scores.empty:
+        return scores
+
+    if "timestamp" not in scores.columns:
+        raise ValueError("scores must include 'timestamp'")
+    if "symbol" not in scores.columns:
+        raise ValueError("scores must include 'symbol'")
+
+    if rank_col not in scores.columns:
+        if "ensemble_pct" in scores.columns:
+            rank_col = "ensemble_pct"
+        elif "ensemble_score" in scores.columns:
+            rank_col = "ensemble_score"
+        else:
+            raise ValueError("scores must include 'ensemble_pct' or 'ensemble_score'")
+
+    s = scores.copy()
+    s["session_date"] = _session_date(s["timestamp"], tz)
+    s[rank_col] = pd.to_numeric(s[rank_col], errors="coerce")
+    s = s.dropna(subset=["session_date", rank_col])
+
+    s = s.sort_values(["session_date", "symbol", rank_col], ascending=[True, True, False])
+    s["daily_rank"] = s.groupby(["session_date", "symbol"], dropna=False).cumcount() + 1
+    s = s[s["daily_rank"] <= int(n_per_symbol)].copy()
+
+    def _mk_id(row: pd.Series) -> str:
+        raw = f"{row['session_date']}|{row['symbol']}|{row.get('timestamp','')}|{row['daily_rank']}|{rank_col}".encode(
+            "utf-8"
+        )
+        return sha1(raw).hexdigest()[:16]
+
+    s["signal_id"] = s.apply(_mk_id, axis=1)
+    return s
+
+
 def build_price_windows(
     signals: pd.DataFrame,
     *,
@@ -302,6 +349,7 @@ def analyze_top_signals_vs_price(
     top_k: int = 5,
     min_percentile: float | None = None,
     percentile_col: str = "ensemble_pct",
+    per_symbol_top_n: int | None = None,
     lookback_days: int = 5,
     forward_days: int = 10,
     tz: str = "America/New_York",
@@ -331,7 +379,14 @@ def analyze_top_signals_vs_price(
     out.mkdir(parents=True, exist_ok=True)
 
     scores = pd.read_parquet(scores_path)
-    if cfg.min_percentile is not None:
+    if per_symbol_top_n is not None:
+        signals = select_top_n_per_symbol_per_day(
+            scores,
+            n_per_symbol=int(per_symbol_top_n),
+            tz=cfg.tz,
+            rank_col=str(cfg.percentile_col),
+        )
+    elif cfg.min_percentile is not None:
         signals = select_all_above_percentile_per_day(
             scores,
             min_percentile=float(cfg.min_percentile),

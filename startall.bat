@@ -75,7 +75,9 @@ if "%TS_SCORES_PATH%"=="" (
 
 if not "%TS_SCORES_PATH%"=="" (
   echo Launching trade_surveillance app with scores: %TS_SCORES_PATH%
-  start "Trade Surveillance" cmd /k "cd /d \"%~dp0\" & .\.venv\Scripts\python.exe -m streamlit run trade_surveillance\viz\streamlit_app.py --server.port %TS_DASHBOARD_PORT% -- --scores \"%TS_SCORES_PATH%\""
+  REM NOTE: Do not use backslash-escaped quotes (\") in cmd.exe; it becomes a literal quote in the argument.
+  REM TS_SCORES_PATH is expected to be a simple relative path without spaces.
+  start "Trade Surveillance" cmd /k "cd /d \"%~dp0\" & .\.venv\Scripts\python.exe -m streamlit run trade_surveillance\viz\streamlit_app.py --server.port %TS_DASHBOARD_PORT% -- --scores %TS_SCORES_PATH%"
 ) else (
   echo.
   echo NOTE: No trade_surveillance scores found.
