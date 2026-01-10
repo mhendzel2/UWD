@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     app_name: str = "UWD Regime EOD"
     log_level: str = "INFO"
     anomaly_ml_enabled: bool = False
+    dev_local_file_read_enabled: bool = False
+    dev_local_file_read_max_bytes: int = 2_000_000
 
     class Config:
         env_file = ".env"

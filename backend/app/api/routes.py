@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from sqlalchemy.orm import Session
 
 from app.anomalies import compute_anomalies_for_session, ScoredAnomaly, TickerRollup
@@ -19,6 +19,7 @@ from app.api.ws import notify_decision, notify_log
 from app.briefs.generate_v1 import generate_briefs
 from app.db.engine import SessionLocal
 from app.db import models
+from app.settings import get_settings
 from app.ecology.compute_v0 import compute_ecology_state
 from app.features.build_v0 import build_feature_row
 from app.features.build_v1 import build_feature_row_v1
@@ -63,6 +64,53 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@router.get("/dev/local-file-text")
+def dev_local_file_text(
+    request: Request,
+    path: str = Query(..., description="Absolute path to a local file (dev-only)"),
+):
+    """Dev-only helper to load CSV/text files from the backend machine.
+
+    Disabled by default. Enable with env var `UW_DEV_LOCAL_FILE_READ_ENABLED=true`.
+    Also restricted to localhost clients to avoid accidental exposure.
+    """
+
+    settings = get_settings()
+    if not getattr(settings, "dev_local_file_read_enabled", False):
+        raise HTTPException(status_code=403, detail="Dev local file read is disabled")
+
+    client_host = getattr(getattr(request, "client", None), "host", None)
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(status_code=403, detail="Dev local file read is restricted to localhost")
+
+    p = Path(path)
+    if not p.is_absolute():
+        raise HTTPException(status_code=400, detail="Path must be absolute")
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Only allow reading small CSV/text files.
+    suffix = p.suffix.lower()
+    if suffix not in {".csv", ".txt"}:
+        raise HTTPException(status_code=400, detail="Only .csv or .txt files are allowed")
+
+    max_bytes = int(getattr(settings, "dev_local_file_read_max_bytes", 2_000_000) or 2_000_000)
+    try:
+        size = p.stat().st_size
+    except OSError:
+        raise HTTPException(status_code=400, detail="Could not stat file")
+    if size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File too large (>{max_bytes} bytes)")
+
+    try:
+        # utf-8-sig handles BOM; errors=replace keeps it robust.
+        text = p.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        raise HTTPException(status_code=400, detail="Could not read file")
+
+    return {"path": str(p), "bytes": size, "text": text}
 
 
 @router.post("/sessions")

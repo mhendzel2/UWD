@@ -43,6 +43,9 @@ Frontend UI actions on Session Dashboard:
 - Compute v1 Ensemble
 - Compute anomalies (per-source) and view the Anomalies review queue
 
+Dev-only helpers:
+- Ticker Batch dashboard can optionally load a local CSV by absolute path via the backend. Enable with `UW_DEV_LOCAL_FILE_READ_ENABLED=true` (localhost-only).
+
 ## Testing
 From `backend`: `pytest`.
 

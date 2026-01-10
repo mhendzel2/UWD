@@ -11,6 +11,7 @@ import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
 import AnomaliesPanel from "./components/AnomaliesPanel";
 import ToastShelf from "./components/ToastShelf";
 import OptionsSignalsDashboard from "./components/options_signals/OptionsSignalsDashboard";
+import TickerBatchDashboard from "./components/ticker_batch/TickerBatchDashboard";
 import { UserStateProvider, useUserState } from "./state/user";
 import { handleAuthFailure } from "./utils/http";
 import "./App.css";
@@ -23,7 +24,16 @@ type Brief = { brief_type: string; entries: any };
 type Ensemble = { underlying: string; ensemble_label: string; ensemble_confidence?: number; horizon_weights?: Record<string, number>; component_votes?: any; stability_metrics?: any };
 
 function AppContent() {
-  const [activeView, setActiveView] = useState<"regime" | "options">("regime");
+  const [activeView, setActiveView] = useState<"regime" | "options" | "tickers">(() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get("view");
+      if (v === "tickers") return "tickers";
+      if (v === "options") return "options";
+      return "regime";
+    } catch {
+      return "regime";
+    }
+  });
   const [sessionId, setSessionId] = useState<string>("");
   const [sessionDate, setSessionDate] = useState<string>("");
   const [strategyMode, setStrategyMode] = useState<string>("INDEX_EOD");
@@ -33,6 +43,21 @@ function AppContent() {
   const [ensembles, setEnsembles] = useState<Ensemble[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const { token, pushToast } = useUserState();
+
+  const setView = useCallback((view: "regime" | "options" | "tickers") => {
+    setActiveView(view);
+    try {
+      const url = new URL(window.location.href);
+      if (view === "regime") {
+        url.searchParams.delete("view");
+      } else {
+        url.searchParams.set("view", view);
+      }
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const authHeaders = useMemo<HeadersInit | undefined>(() => (token ? { Authorization: `Bearer ${token}` } : undefined), [token]);
 
@@ -232,19 +257,30 @@ function AppContent() {
       <header>
         <div className="appHeaderRow">
           <div>
-            <h1>{activeView === "regime" ? "Regime-First EOD v1" : "Options Signals Dashboard"}</h1>
+            <h1>
+              {activeView === "regime"
+                ? "Regime-First EOD v1"
+                : activeView === "options"
+                  ? "Options Signals Dashboard"
+                  : "Ticker Batch Analysis"}
+            </h1>
             <p>
               {activeView === "regime"
                 ? "Discovery briefs, ecology interpretability, and v1 ensemble layered on v0 compatibility."
-                : "Feature-engineered leading indicators and ranked opportunities per underlying."}
+                : activeView === "options"
+                  ? "Feature-engineered leading indicators and ranked opportunities per underlying."
+                  : "Upload a ticker list and pull regime/ensemble/anomaly + options-signal views in one place."}
             </p>
           </div>
           <nav className="appNav">
-            <button className={activeView === "regime" ? "active" : ""} onClick={() => setActiveView("regime")}>
+            <button className={activeView === "regime" ? "active" : ""} onClick={() => setView("regime")}>
               Regime Dashboard
             </button>
-            <button className={activeView === "options" ? "active" : ""} onClick={() => setActiveView("options")}>
+            <button className={activeView === "options" ? "active" : ""} onClick={() => setView("options")}>
               Options Signals
+            </button>
+            <button className={activeView === "tickers" ? "active" : ""} onClick={() => setView("tickers")}>
+              Ticker Batch
             </button>
           </nav>
         </div>
@@ -312,8 +348,10 @@ function AppContent() {
 
           <LogsPanel logs={logs} />
         </>
-      ) : (
+      ) : activeView === "options" ? (
         <OptionsSignalsDashboard apiBase={API_BASE} />
+      ) : (
+        <TickerBatchDashboard apiBase={API_BASE} sessionId={sessionId} sessionDate={sessionDate} />
       )}
     </div>
   );

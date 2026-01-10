@@ -1,0 +1,226 @@
+.tbRoot {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+  background: #fff;
+}
+
+.tbHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.tbHeader h2 {
+  margin: 0;
+}
+
+.tbMuted {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.tbGrid2 {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .tbGrid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tbCard {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.tbRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tbRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tbRow input,
+.tbRow select,
+.tbRow textarea {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 14px;
+}
+
+.tbRow textarea {
+  min-height: 130px;
+  width: 100%;
+  resize: vertical;
+}
+
+.tbWideLabel {
+  width: 100%;
+}
+
+.tbActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tbActions button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tbActions button.primary {
+  background: #111827;
+  border-color: #111827;
+  color: #f9fafb;
+}
+
+.tbActions button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tbStats {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.tbStat {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.tbStatLabel {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.tbStatValue {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.tbTableWrap {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tbTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.tbTable th,
+.tbTable td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  text-align: left;
+  font-size: 13px;
+}
+
+.tbTable th {
+  background: #f9fafb;
+  user-select: none;
+  cursor: pointer;
+}
+
+.tbBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.tbBadge.good {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.tbBadge.warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.tbBadge.bad {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.tbDetails {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.tbDetailsHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tbMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.tbError {
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.tbMt8 {
+  margin-top: 8px;
+}
+
+.tbMt10 {
+  margin-top: 10px;
+}
+
+.tbTickerButton {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: #111827;
+  font-weight: 700;
+}
+
+.tbSelectedRow {
+  background: #f3f4f6;
+}
