@@ -11,6 +11,27 @@
 				"/f"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Docker compose up",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"compose",
+				"up",
+				"-d"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Backend alembic upgrade head",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d backend & C:\\Users\\mjhen\\Github\\UWD\\.venv\\Scripts\\alembic.exe upgrade head"
+			],
+			"isBackground": false
 		}
 	]
 }
