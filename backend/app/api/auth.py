@@ -17,6 +17,7 @@ class Capability(str, Enum):
     GENERATE_BRIEFS = "generate_briefs"
     COMPUTE_V1 = "compute_v1"
     COMPUTE_ANOMALIES = "compute_anomalies"
+    COMPUTE_CORRELATIONS = "compute_correlations"
 
 
 _TOKEN_ROLES: Dict[str, tuple[str, UserRole]] = {
@@ -33,6 +34,7 @@ _ROLE_CAPABILITIES: Dict[UserRole, set[Capability]] = {
         Capability.GENERATE_BRIEFS,
         Capability.COMPUTE_V1,
         Capability.COMPUTE_ANOMALIES,
+        Capability.COMPUTE_CORRELATIONS,
     },
     UserRole.ANALYST: {
         Capability.COMPUTE_V0,
@@ -40,6 +42,7 @@ _ROLE_CAPABILITIES: Dict[UserRole, set[Capability]] = {
         Capability.GENERATE_BRIEFS,
         Capability.COMPUTE_V1,
         Capability.COMPUTE_ANOMALIES,
+        Capability.COMPUTE_CORRELATIONS,
     },
     UserRole.VIEWER: set(),
 }

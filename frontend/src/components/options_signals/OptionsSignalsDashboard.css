@@ -1,0 +1,304 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500&display=swap");
+
+.osRoot {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top left, #fef6e4 0%, #f7efe4 30%, #eef3f7 100%);
+  border-radius: 24px;
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.osRoot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, rgba(36, 79, 104, 0.08), transparent 45%);
+  pointer-events: none;
+}
+
+.osHero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.osHero h1 {
+  font-size: 32px;
+  margin: 6px 0 8px;
+  letter-spacing: -0.5px;
+}
+
+.osEyebrow {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.osSubhead {
+  font-family: "Source Serif 4", serif;
+  margin: 0;
+  color: #3f3f46;
+}
+
+.osHeroBadge {
+  background: #111827;
+  color: #f9fafb;
+  padding: 16px 20px;
+  border-radius: 16px;
+  display: grid;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.osHeroBadge span {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #d1d5db;
+}
+
+.osHeroBadge strong {
+  font-size: 16px;
+}
+
+.osFilters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  position: relative;
+  z-index: 1;
+}
+
+.osFilters label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.osFilters input,
+.osFilters select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  font-family: inherit;
+}
+
+.osFilters button {
+  border: none;
+  border-radius: 10px;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: end;
+  padding: 10px;
+}
+
+.osTabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.osTabs button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.osTabs button.active {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #0f172a;
+}
+
+.osToggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.osGrid {
+  display: grid;
+  gap: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.osCard {
+  background: #fff;
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.osCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.osCardHeader h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.osTableWrap {
+  overflow-x: auto;
+}
+
+.osTableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.osTableWrap th,
+.osTableWrap td {
+  padding: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.osTableWrap tbody tr:hover {
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.osSymbol {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.osPositive {
+  color: #15803d;
+}
+
+.osNegative {
+  color: #b91c1c;
+}
+
+.osDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.osMetricLine {
+  margin: 6px 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.osTablesSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.osTablesSplit table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.osTablesSplit th,
+.osTablesSplit td {
+  border-bottom: 1px solid #f1f5f9;
+  padding: 6px;
+}
+
+.osAlerts {
+  display: grid;
+  gap: 10px;
+}
+
+.osAlertLog {
+  display: grid;
+  gap: 12px;
+}
+
+.osAlert {
+  border-radius: 12px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.osAlert.high {
+  border-color: #dc2626;
+  background: #fff1f2;
+}
+
+.osAlert.medium {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.osAlertEmpty {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.osQualityGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.osQualityRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 12px;
+}
+
+.osSparkline {
+  width: 100%;
+  height: 50px;
+  color: #0f766e;
+}
+
+.osSparklineEmpty {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+@media (max-width: 900px) {
+  .osHero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .osTablesSplit {
+    grid-template-columns: 1fr;
+  }
+}

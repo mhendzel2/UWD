@@ -1,0 +1,55 @@
+{
+  "version": "v1",
+  "signals": [
+    {
+      "name": "BULL_FLOW",
+      "label": "Bullish Flow Signal",
+      "formula": "z(call_buy_premium_60) - z(put_buy_premium_60) + 0.5*z(net_delta_60)",
+      "required_features": ["call_buy_premium", "put_buy_premium", "net_delta"],
+      "enabled": true,
+      "thresholds": {
+        "alert": 2.5
+      }
+    },
+    {
+      "name": "BEAR_FLOW",
+      "label": "Bearish Flow Signal",
+      "formula": "z(put_buy_premium_60) - z(call_buy_premium_60) - 0.5*z(net_delta_60)",
+      "required_features": ["call_buy_premium", "put_buy_premium", "net_delta"],
+      "enabled": true,
+      "thresholds": {
+        "alert": 2.5
+      }
+    },
+    {
+      "name": "VOL_EXPANSION",
+      "label": "Volatility Expansion Watch",
+      "formula": "z(iv_atm_proxy_change_5d) + z(rv_10_change_5d) + z(news_count_60)",
+      "required_features": ["iv_atm_proxy_change_5d", "rv_10_change_5d", "news_count"],
+      "enabled": true,
+      "thresholds": {
+        "alert": 2.0
+      }
+    },
+    {
+      "name": "TECH_BREAKOUT",
+      "label": "Technical Breakout Confirmation",
+      "formula": "1.0*is_new_20d_high - 1.0*is_new_20d_low + 0.5*z(bb_width_60)",
+      "required_features": ["is_new_20d_high", "is_new_20d_low", "bb_width"],
+      "enabled": true,
+      "thresholds": {
+        "alert": 1.5
+      }
+    },
+    {
+      "name": "CONTRARIAN_CALLS",
+      "label": "Crowded Sentiment (Contrarian)",
+      "formula": "-z(put_call_vol_ratio_60)",
+      "required_features": ["put_call_vol_ratio"],
+      "enabled": false,
+      "thresholds": {
+        "alert": 2.0
+      }
+    }
+  ]
+}

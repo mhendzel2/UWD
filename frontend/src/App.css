@@ -5,6 +5,32 @@
   gap: 16px;
 }
 
+.appHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.appNav {
+  display: flex;
+  gap: 8px;
+}
+
+.appNav button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.appNav button.active {
+  background: #111827;
+  border-color: #111827;
+  color: #f9fafb;
+}
+
 .sessionControls {
   display: grid;
   gap: 8px;

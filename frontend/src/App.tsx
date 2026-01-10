@@ -10,6 +10,7 @@ import ChartsPanel from "./components/ChartsPanel";
 import OutlierDetectionPanel from "./components/OutlierDetectionPanel";
 import AnomaliesPanel from "./components/AnomaliesPanel";
 import ToastShelf from "./components/ToastShelf";
+import OptionsSignalsDashboard from "./components/options_signals/OptionsSignalsDashboard";
 import { UserStateProvider, useUserState } from "./state/user";
 import { handleAuthFailure } from "./utils/http";
 import "./App.css";
@@ -22,6 +23,7 @@ type Brief = { brief_type: string; entries: any };
 type Ensemble = { underlying: string; ensemble_label: string; ensemble_confidence?: number; horizon_weights?: Record<string, number>; component_votes?: any; stability_metrics?: any };
 
 function AppContent() {
+  const [activeView, setActiveView] = useState<"regime" | "options">("regime");
   const [sessionId, setSessionId] = useState<string>("");
   const [sessionDate, setSessionDate] = useState<string>("");
   const [strategyMode, setStrategyMode] = useState<string>("INDEX_EOD");
@@ -228,69 +230,91 @@ function AppContent() {
     <div className="appRoot">
       <ToastShelf />
       <header>
-        <h1>Regime-First EOD v1</h1>
-        <p>Discovery briefs, ecology interpretability, and v1 ensemble layered on v0 compatibility.</p>
+        <div className="appHeaderRow">
+          <div>
+            <h1>{activeView === "regime" ? "Regime-First EOD v1" : "Options Signals Dashboard"}</h1>
+            <p>
+              {activeView === "regime"
+                ? "Discovery briefs, ecology interpretability, and v1 ensemble layered on v0 compatibility."
+                : "Feature-engineered leading indicators and ranked opportunities per underlying."}
+            </p>
+          </div>
+          <nav className="appNav">
+            <button className={activeView === "regime" ? "active" : ""} onClick={() => setActiveView("regime")}>
+              Regime Dashboard
+            </button>
+            <button className={activeView === "options" ? "active" : ""} onClick={() => setActiveView("options")}>
+              Options Signals
+            </button>
+          </nav>
+        </div>
       </header>
 
-      <section className="sessionControls">
-        <label>
-          Session Date (YYYY-MM-DD)
-          <input value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} placeholder="2024-01-05" />
-        </label>
-        <label>
-          Strategy Mode
-          <select value={strategyMode} onChange={(e) => setStrategyMode(e.target.value)}>
-            <option value="INDEX_EOD">INDEX_EOD</option>
-            <option value="EQUITY_THU_EOD">EQUITY_THU_EOD</option>
-          </select>
-        </label>
-        <button disabled={!sessionDate} onClick={createSession}>
-          Create Session
-        </button>
-        {sessionId && <div>Session ID: {sessionId}</div>}
-      </section>
+      {activeView === "regime" ? (
+        <>
+          <section className="sessionControls">
+            <label>
+              Session Date (YYYY-MM-DD)
+              <input value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} placeholder="2024-01-05" />
+            </label>
+            <label>
+              Strategy Mode
+              <select value={strategyMode} onChange={(e) => setStrategyMode(e.target.value)}>
+                <option value="INDEX_EOD">INDEX_EOD</option>
+                <option value="EQUITY_THU_EOD">EQUITY_THU_EOD</option>
+              </select>
+            </label>
+            <button disabled={!sessionDate} onClick={createSession}>
+              Create Session
+            </button>
+            {sessionId && <div>Session ID: {sessionId}</div>}
+          </section>
 
-      <UploadDataset
-        apiBase={API_BASE}
-        sessionId={sessionId}
-        onSessionCreated={handleSessionCreated}
-        onUploaded={(msg) => setLogs((prev) => [msg, ...prev])}
-      />
+          <UploadDataset
+            apiBase={API_BASE}
+            sessionId={sessionId}
+            onSessionCreated={handleSessionCreated}
+            onUploaded={(msg) => setLogs((prev) => [msg, ...prev])}
+          />
 
-      <SessionDashboard
-        apiBase={API_BASE}
-        sessionId={sessionId}
-        sessionDate={sessionDate}
-        onCompute={compute}
-        onComputeEcology={computeEcology}
-        onGenerateBriefs={generateDailyBriefs}
-        onComputeV1={computeV1}
-        decisionTable={decisionTable}
-      />
+          <SessionDashboard
+            apiBase={API_BASE}
+            sessionId={sessionId}
+            sessionDate={sessionDate}
+            onCompute={compute}
+            onComputeEcology={computeEcology}
+            onGenerateBriefs={generateDailyBriefs}
+            onComputeV1={computeV1}
+            decisionTable={decisionTable}
+          />
 
-      <ChartsPanel regimes={regimes} />
+          <ChartsPanel regimes={regimes} />
 
-      <AnomaliesPanel
-        apiBase={API_BASE}
-        sessionId={sessionId}
-        sessionDate={sessionDate}
-        onLog={(msg) => setLogs((prev) => [msg, ...prev])}
-      />
+          <AnomaliesPanel
+            apiBase={API_BASE}
+            sessionId={sessionId}
+            sessionDate={sessionDate}
+            onLog={(msg) => setLogs((prev) => [msg, ...prev])}
+          />
 
-      <OutlierDetectionPanel
-        apiBase={API_BASE}
-        sessionId={sessionId}
-        sessionDate={sessionDate}
-        onLog={(msg) => setLogs((prev) => [msg, ...prev])}
-      />
+          <OutlierDetectionPanel
+            apiBase={API_BASE}
+            sessionId={sessionId}
+            sessionDate={sessionDate}
+            onLog={(msg) => setLogs((prev) => [msg, ...prev])}
+          />
 
-      <DailyBriefsPanel briefs={briefs} regimeMap={regimeMap} />
-      <EcologyPanel entries={ecologyEntries} />
-      <EnsemblePanel ensembles={ensembles} />
+          <DailyBriefsPanel briefs={briefs} regimeMap={regimeMap} />
+          <EcologyPanel entries={ecologyEntries} />
+          <EnsemblePanel ensembles={ensembles} />
 
-      <ManualOutcomeLabel apiBase={API_BASE} defaultDate={sessionDate} onSaved={(msg) => setLogs((prev) => [msg, ...prev])} />
+          <ManualOutcomeLabel apiBase={API_BASE} defaultDate={sessionDate} onSaved={(msg) => setLogs((prev) => [msg, ...prev])} />
 
-      <LogsPanel logs={logs} />
+          <LogsPanel logs={logs} />
+        </>
+      ) : (
+        <OptionsSignalsDashboard apiBase={API_BASE} />
+      )}
     </div>
   );
 }

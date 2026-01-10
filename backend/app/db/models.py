@@ -113,6 +113,7 @@ class Session(Base):
     ensembles = relationship("EnsembleDecision", back_populates="session", cascade="all, delete-orphan")
     anomaly_events = relationship("AnomalyEvent", back_populates="session", cascade="all, delete-orphan")
     anomaly_rollups = relationship("AnomalyTickerRollup", back_populates="session", cascade="all, delete-orphan")
+    correlation_runs = relationship("CorrelationRun", back_populates="session", cascade="all, delete-orphan")
 
 
 class RawFile(Base):
@@ -598,3 +599,398 @@ class OutlierMethodStats(Base):
     # Metadata
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     as_of_date = Column(Date, nullable=False)
+
+
+class CorrelationRun(Base):
+    """Persisted factor↔future-return correlation snapshots.
+
+    This is a lightweight, JSON-first artifact meant to support dashboards and
+    exploration without re-running compute.
+    """
+
+    __tablename__ = "correlation_runs"
+    __table_args__ = (
+        UniqueConstraint("session_id", "asof_date", "version", name="uq_correlation_run"),
+        Index("ix_correlation_runs_session", "session_id"),
+        Index("ix_correlation_runs_date", "asof_date"),
+    )
+
+    run_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(GUID(), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    asof_date = Column(Date, nullable=False)
+    version = Column(String(16), nullable=False, default="v1")
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    params = Column(JSON, nullable=True)
+    results = Column(JSON, nullable=True)
+
+    session = relationship("Session", back_populates="correlation_runs")
+
+
+# =============================================================================
+# Options Signals (Options flow, features, and alerts)
+# =============================================================================
+
+
+class OptTradeRaw(Base):
+    __tablename__ = "opt_trades_raw"
+    __table_args__ = (
+        Index("ix_opt_trades_raw_date_underlying", "trade_date", "underlying_symbol"),
+        Index("ix_opt_trades_raw_chain", "option_chain_id"),
+    )
+
+    trade_id = Column(String(64), primary_key=True)
+    executed_at_utc = Column(DateTime, nullable=False)
+    executed_at_market = Column(DateTime, nullable=False)
+    trade_date = Column(Date, nullable=False)
+
+    underlying_symbol = Column(String(32), nullable=False)
+    option_chain_id = Column(String(64), nullable=False)
+    side = Column(String(16), nullable=True)
+    strike = Column(Numeric(12, 4), nullable=True)
+    option_type = Column(String(8), nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    underlying_price = Column(Numeric(12, 4), nullable=True)
+
+    nbbo_bid = Column(Numeric(12, 4), nullable=True)
+    nbbo_ask = Column(Numeric(12, 4), nullable=True)
+    ewma_nbbo_bid = Column(Numeric(12, 4), nullable=True)
+    ewma_nbbo_ask = Column(Numeric(12, 4), nullable=True)
+    price = Column(Numeric(12, 4), nullable=True)
+    size = Column(Integer, nullable=True)
+    premium = Column(Numeric(14, 2), nullable=True)
+    volume = Column(Integer, nullable=True)
+    open_interest = Column(Integer, nullable=True)
+
+    implied_volatility = Column(Numeric(10, 6), nullable=True)
+    delta = Column(Numeric(12, 6), nullable=True)
+    theta = Column(Numeric(12, 6), nullable=True)
+    gamma = Column(Numeric(12, 6), nullable=True)
+    vega = Column(Numeric(12, 6), nullable=True)
+    rho = Column(Numeric(12, 6), nullable=True)
+    theo = Column(Numeric(12, 6), nullable=True)
+
+    sector = Column(String(64), nullable=True)
+    exchange = Column(String(32), nullable=True)
+    report_flags = Column(String(64), nullable=True)
+    canceled = Column(Boolean, nullable=True)
+    upstream_condition_detail = Column(Text, nullable=True)
+    equity_type = Column(String(32), nullable=True)
+
+    trade_direction = Column(String(24), nullable=True)
+    nbbo_valid = Column(Boolean, nullable=False, default=False)
+    excluded_reason = Column(String(64), nullable=True)
+    is_excluded = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EqOhlcvDaily(Base):
+    __tablename__ = "eq_ohlcv_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "underlying_symbol", name="uq_eq_ohlcv_daily"),
+        Index("ix_eq_ohlcv_daily_symbol", "underlying_symbol"),
+    )
+
+    ohlcv_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    open = Column(Numeric(12, 4), nullable=True)
+    high = Column(Numeric(12, 4), nullable=True)
+    low = Column(Numeric(12, 4), nullable=True)
+    close = Column(Numeric(12, 4), nullable=True)
+    adj_close = Column(Numeric(12, 4), nullable=True)
+    volume = Column(Integer, nullable=True)
+
+
+class MktContextDaily(Base):
+    __tablename__ = "mkt_context_daily"
+    __table_args__ = (UniqueConstraint("trade_date", name="uq_mkt_context_daily"),)
+
+    context_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    spx_close = Column(Numeric(12, 4), nullable=True)
+    spx_return_1d = Column(Numeric(12, 6), nullable=True)
+    spx_return_5d = Column(Numeric(12, 6), nullable=True)
+    vix_close = Column(Numeric(12, 4), nullable=True)
+    vix_change_1d = Column(Numeric(12, 6), nullable=True)
+    vix_change_5d = Column(Numeric(12, 6), nullable=True)
+    t10y_yield = Column(Numeric(12, 6), nullable=True)
+    t10y_change_1d = Column(Numeric(12, 6), nullable=True)
+    t10y_change_5d = Column(Numeric(12, 6), nullable=True)
+    credit_spread = Column(Numeric(12, 6), nullable=True)
+    wti_close = Column(Numeric(12, 4), nullable=True)
+    wti_ret_1d = Column(Numeric(12, 6), nullable=True)
+
+
+class SectorContextDaily(Base):
+    __tablename__ = "sector_context_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "sector_or_etf", name="uq_sector_context_daily"),
+        Index("ix_sector_context_sector", "sector_or_etf"),
+    )
+
+    context_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    sector_or_etf = Column(String(64), nullable=False)
+    close = Column(Numeric(12, 4), nullable=True)
+    return_1d = Column(Numeric(12, 6), nullable=True)
+    return_5d = Column(Numeric(12, 6), nullable=True)
+    realized_vol_20d = Column(Numeric(12, 6), nullable=True)
+
+
+class NewsSentimentDaily(Base):
+    __tablename__ = "news_sentiment_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "underlying_symbol", name="uq_news_sentiment_daily"),
+        Index("ix_news_sentiment_symbol", "underlying_symbol"),
+    )
+
+    news_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    article_count_24h = Column(Integer, nullable=True)
+    sentiment_mean = Column(Numeric(10, 6), nullable=True)
+    sentiment_std = Column(Numeric(10, 6), nullable=True)
+    sentiment_abs_mean = Column(Numeric(10, 6), nullable=True)
+    source_count = Column(Integer, nullable=True)
+    news_missing = Column(Boolean, nullable=False, default=False)
+
+
+class OptAggUnderlyingDaily(Base):
+    __tablename__ = "opt_agg_underlying_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "underlying_symbol", name="uq_opt_agg_underlying_daily"),
+        Index("ix_opt_agg_underlying_symbol", "underlying_symbol"),
+    )
+
+    agg_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    sector = Column(String(64), nullable=True)
+
+    call_volume = Column(Numeric(14, 2), nullable=True)
+    put_volume = Column(Numeric(14, 2), nullable=True)
+    call_premium = Column(Numeric(16, 2), nullable=True)
+    put_premium = Column(Numeric(16, 2), nullable=True)
+    call_trade_count = Column(Integer, nullable=True)
+    put_trade_count = Column(Integer, nullable=True)
+    avg_iv_call = Column(Numeric(10, 6), nullable=True)
+    avg_iv_put = Column(Numeric(10, 6), nullable=True)
+    avg_iv_all = Column(Numeric(10, 6), nullable=True)
+    oi_call_eod = Column(Numeric(14, 2), nullable=True)
+    oi_put_eod = Column(Numeric(14, 2), nullable=True)
+    oi_change_call = Column(Numeric(14, 2), nullable=True)
+    oi_change_put = Column(Numeric(14, 2), nullable=True)
+    pct_trades_missing_nbbo = Column(Numeric(8, 4), nullable=True)
+
+    put_call_vol_ratio = Column(Numeric(12, 6), nullable=True)
+    put_call_prem_ratio = Column(Numeric(12, 6), nullable=True)
+    call_buy_premium = Column(Numeric(16, 2), nullable=True)
+    call_sell_premium = Column(Numeric(16, 2), nullable=True)
+    put_buy_premium = Column(Numeric(16, 2), nullable=True)
+    put_sell_premium = Column(Numeric(16, 2), nullable=True)
+    net_call_premium = Column(Numeric(16, 2), nullable=True)
+    net_put_premium = Column(Numeric(16, 2), nullable=True)
+    net_premium = Column(Numeric(16, 2), nullable=True)
+    net_delta = Column(Numeric(16, 4), nullable=True)
+    net_gamma = Column(Numeric(16, 4), nullable=True)
+    net_vega = Column(Numeric(16, 4), nullable=True)
+
+    net_premium_atm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_atm_puts = Column(Numeric(16, 2), nullable=True)
+    net_premium_otm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_otm_puts = Column(Numeric(16, 2), nullable=True)
+    net_premium_deep_otm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_deep_otm_puts = Column(Numeric(16, 2), nullable=True)
+
+
+class OptAggContractDaily(Base):
+    __tablename__ = "opt_agg_contract_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "option_chain_id", name="uq_opt_agg_contract_daily"),
+        Index("ix_opt_agg_contract_chain", "option_chain_id"),
+    )
+
+    agg_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    option_chain_id = Column(String(64), nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    expiry_date = Column(Date, nullable=True)
+    option_type = Column(String(8), nullable=True)
+    strike = Column(Numeric(12, 4), nullable=True)
+
+    contract_volume = Column(Numeric(14, 2), nullable=True)
+    contract_premium = Column(Numeric(16, 2), nullable=True)
+    contract_trade_count = Column(Integer, nullable=True)
+    iv_last = Column(Numeric(10, 6), nullable=True)
+    iv_vwap = Column(Numeric(10, 6), nullable=True)
+    delta_last = Column(Numeric(12, 6), nullable=True)
+    gamma_last = Column(Numeric(12, 6), nullable=True)
+    vega_last = Column(Numeric(12, 6), nullable=True)
+    oi_eod = Column(Numeric(14, 2), nullable=True)
+
+    uoa_volume_z = Column(Numeric(12, 6), nullable=True)
+    uoa_premium_z = Column(Numeric(12, 6), nullable=True)
+    uoa_vo_i = Column(Numeric(12, 6), nullable=True)
+    is_uoa = Column(Boolean, nullable=False, default=False)
+
+
+class FeaturesUnderlyingDaily(Base):
+    __tablename__ = "features_underlying_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "underlying_symbol", name="uq_features_underlying_daily"),
+        Index("ix_features_underlying_symbol", "underlying_symbol"),
+    )
+
+    feature_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    sector = Column(String(64), nullable=True)
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Flow metrics
+    call_volume = Column(Numeric(14, 2), nullable=True)
+    put_volume = Column(Numeric(14, 2), nullable=True)
+    call_premium = Column(Numeric(16, 2), nullable=True)
+    put_premium = Column(Numeric(16, 2), nullable=True)
+    put_call_vol_ratio = Column(Numeric(12, 6), nullable=True)
+    put_call_prem_ratio = Column(Numeric(12, 6), nullable=True)
+    call_buy_premium = Column(Numeric(16, 2), nullable=True)
+    call_sell_premium = Column(Numeric(16, 2), nullable=True)
+    put_buy_premium = Column(Numeric(16, 2), nullable=True)
+    put_sell_premium = Column(Numeric(16, 2), nullable=True)
+    net_call_premium = Column(Numeric(16, 2), nullable=True)
+    net_put_premium = Column(Numeric(16, 2), nullable=True)
+    net_premium = Column(Numeric(16, 2), nullable=True)
+    net_delta = Column(Numeric(16, 4), nullable=True)
+    net_gamma = Column(Numeric(16, 4), nullable=True)
+    net_vega = Column(Numeric(16, 4), nullable=True)
+    iv_vwap_all = Column(Numeric(10, 6), nullable=True)
+    iv_vwap_call = Column(Numeric(10, 6), nullable=True)
+    iv_vwap_put = Column(Numeric(10, 6), nullable=True)
+
+    net_premium_atm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_atm_puts = Column(Numeric(16, 2), nullable=True)
+    net_premium_otm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_otm_puts = Column(Numeric(16, 2), nullable=True)
+    net_premium_deep_otm_calls = Column(Numeric(16, 2), nullable=True)
+    net_premium_deep_otm_puts = Column(Numeric(16, 2), nullable=True)
+
+    uoa_contract_count = Column(Integer, nullable=True)
+    uoa_max_volume_z = Column(Numeric(12, 6), nullable=True)
+    uoa_max_vo_i = Column(Numeric(12, 6), nullable=True)
+    uoa_total_premium = Column(Numeric(16, 2), nullable=True)
+
+    iv_25d_call = Column(Numeric(10, 6), nullable=True)
+    iv_25d_put = Column(Numeric(10, 6), nullable=True)
+    skew_25d = Column(Numeric(10, 6), nullable=True)
+    iv_front = Column(Numeric(10, 6), nullable=True)
+    iv_back = Column(Numeric(10, 6), nullable=True)
+    term_structure = Column(Numeric(10, 6), nullable=True)
+
+    # Technicals
+    close = Column(Numeric(12, 4), nullable=True)
+    ret_1d = Column(Numeric(12, 6), nullable=True)
+    ret_5d = Column(Numeric(12, 6), nullable=True)
+    ret_10d = Column(Numeric(12, 6), nullable=True)
+    ret_20d = Column(Numeric(12, 6), nullable=True)
+    sma_20 = Column(Numeric(12, 6), nullable=True)
+    sma_50 = Column(Numeric(12, 6), nullable=True)
+    ema_12 = Column(Numeric(12, 6), nullable=True)
+    ema_26 = Column(Numeric(12, 6), nullable=True)
+    rsi_14 = Column(Numeric(12, 6), nullable=True)
+    macd = Column(Numeric(12, 6), nullable=True)
+    macd_signal = Column(Numeric(12, 6), nullable=True)
+    macd_hist = Column(Numeric(12, 6), nullable=True)
+    bb_mid = Column(Numeric(12, 6), nullable=True)
+    bb_std = Column(Numeric(12, 6), nullable=True)
+    bb_upper = Column(Numeric(12, 6), nullable=True)
+    bb_lower = Column(Numeric(12, 6), nullable=True)
+    bb_width = Column(Numeric(12, 6), nullable=True)
+    bb_pct = Column(Numeric(12, 6), nullable=True)
+    rv_10 = Column(Numeric(12, 6), nullable=True)
+    rv_20 = Column(Numeric(12, 6), nullable=True)
+    is_new_20d_high = Column(Boolean, nullable=True)
+    is_new_20d_low = Column(Boolean, nullable=True)
+
+    # Volatility and IV regime
+    iv_atm_proxy = Column(Numeric(10, 6), nullable=True)
+    iv_minus_rv20 = Column(Numeric(12, 6), nullable=True)
+    iv_to_rv20_ratio = Column(Numeric(12, 6), nullable=True)
+    iv_rank_252 = Column(Numeric(12, 6), nullable=True)
+    rv20_z = Column(Numeric(12, 6), nullable=True)
+    iv_atm_proxy_change_1d = Column(Numeric(12, 6), nullable=True)
+    iv_atm_proxy_change_5d = Column(Numeric(12, 6), nullable=True)
+    rv_10_change_5d = Column(Numeric(12, 6), nullable=True)
+
+    # News + macro
+    news_count = Column(Integer, nullable=True)
+    sentiment_mean = Column(Numeric(10, 6), nullable=True)
+    sentiment_abs = Column(Numeric(10, 6), nullable=True)
+    sentiment_change_1d = Column(Numeric(10, 6), nullable=True)
+    news_count_z_60 = Column(Numeric(12, 6), nullable=True)
+    news_missing = Column(Boolean, nullable=True)
+
+    spx_ret_1d = Column(Numeric(12, 6), nullable=True)
+    spx_ret_5d = Column(Numeric(12, 6), nullable=True)
+    vix_level = Column(Numeric(12, 6), nullable=True)
+    vix_change_1d = Column(Numeric(12, 6), nullable=True)
+    vix_change_5d = Column(Numeric(12, 6), nullable=True)
+    t10y_change_1d = Column(Numeric(12, 6), nullable=True)
+    t10y_change_5d = Column(Numeric(12, 6), nullable=True)
+    wti_ret_1d = Column(Numeric(12, 6), nullable=True)
+    sector_ret_1d = Column(Numeric(12, 6), nullable=True)
+    sector_ret_5d = Column(Numeric(12, 6), nullable=True)
+    sector_rv_20 = Column(Numeric(12, 6), nullable=True)
+
+    pct_trades_missing_nbbo = Column(Numeric(8, 4), nullable=True)
+
+
+class SignalsUnderlyingDaily(Base):
+    __tablename__ = "signals_underlying_daily"
+    __table_args__ = (
+        UniqueConstraint("trade_date", "underlying_symbol", "signal_name", name="uq_signals_underlying_daily"),
+        Index("ix_signals_underlying_date_signal", "trade_date", "signal_name"),
+        Index("ix_signals_underlying_score", "signal_name", "score"),
+    )
+
+    signal_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    signal_name = Column(String(32), nullable=False)
+    score = Column(Numeric(14, 6), nullable=False)
+    rank = Column(Integer, nullable=True)
+    explanation_json = Column(JSON, nullable=True)
+    thresholds_triggered = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AlertsEventLog(Base):
+    __tablename__ = "alerts_event_log"
+    __table_args__ = (
+        Index("ix_alerts_event_date", "trade_date"),
+        Index("ix_alerts_event_symbol", "underlying_symbol"),
+    )
+
+    event_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    event_ts = Column(DateTime, nullable=False, default=datetime.utcnow)
+    trade_date = Column(Date, nullable=False)
+    underlying_symbol = Column(String(32), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    severity = Column(String(16), nullable=True)
+    payload_json = Column(JSON, nullable=True)
+
+
+class OptionsSignalsDataQualityDaily(Base):
+    __tablename__ = "options_signals_data_quality_daily"
+    __table_args__ = (UniqueConstraint("trade_date", name="uq_options_signals_quality_daily"),)
+
+    quality_id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False)
+    total_trades = Column(Integer, nullable=True)
+    canceled_filtered = Column(Integer, nullable=True)
+    trades_missing_nbbo = Column(Integer, nullable=True)
+    symbols_missing_ohlcv = Column(Integer, nullable=True)
+    symbols_missing_news = Column(Integer, nullable=True)
+    freshness_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

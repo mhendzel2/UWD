@@ -1,0 +1,47 @@
+{
+  "version": "v1",
+  "features": [
+    {
+      "name": "call_volume",
+      "dependencies": ["opt_trades_raw"],
+      "computation": "aggregate_flow",
+      "description": "Total call contract volume per underlying per day."
+    },
+    {
+      "name": "put_volume",
+      "dependencies": ["opt_trades_raw"],
+      "computation": "aggregate_flow",
+      "description": "Total put contract volume per underlying per day."
+    },
+    {
+      "name": "net_premium",
+      "dependencies": ["opt_trades_raw"],
+      "computation": "aggregate_directional_flow",
+      "description": "Directional net premium (calls minus puts) based on trade direction."
+    },
+    {
+      "name": "iv_atm_proxy",
+      "dependencies": ["opt_trades_raw"],
+      "computation": "compute_iv_proxy",
+      "description": "Best-effort ATM IV proxy from trades (delta-filtered median or IV vwap)."
+    },
+    {
+      "name": "rv_20",
+      "dependencies": ["eq_ohlcv_daily"],
+      "computation": "compute_realized_volatility",
+      "description": "20-day realized volatility from OHLCV."
+    },
+    {
+      "name": "skew_25d",
+      "dependencies": ["opt_trades_raw"],
+      "computation": "compute_skew",
+      "description": "25-delta skew from trades (put IV minus call IV)."
+    },
+    {
+      "name": "news_count",
+      "dependencies": ["news_sentiment_daily"],
+      "computation": "join_news",
+      "description": "24h article count and derived z-scores."
+    }
+  ]
+}

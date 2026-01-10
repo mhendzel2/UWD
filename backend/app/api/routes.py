@@ -3,10 +3,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 
 from app.anomalies import compute_anomalies_for_session, ScoredAnomaly, TickerRollup
+from app.analysis.correlations_v1 import compute_and_persist_correlations_v1
 from app.api.auth import (
     AuthenticatedUser,
     Capability,
@@ -30,12 +31,30 @@ from app.stability.report_v1 import build_stability_snapshot
 from app.utils.hashing import sha256_file
 from app.utils.time import parse_date
 from app.ingest.local_files import import_local_options_flow_file
+from app.options_signals import service as options_signals_service
 from app.backtest.config import BacktestConfig
 from app.backtest.engine import OptionsBacktester
 from app.backtest.data_provider import MockDataProvider
 from app.db.models import BacktestRun, SimulatedTrade, DailyEquityCurve
 
 router = APIRouter()
+
+
+def _parse_csv_ints(value: str | None, *, default: list[int]) -> list[int]:
+    if not value:
+        return default
+    out: list[int] = []
+    for part in str(value).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            v = int(part)
+        except ValueError:
+            continue
+        if v > 0:
+            out.append(v)
+    return out or default
 
 
 def get_db():
@@ -174,6 +193,25 @@ def import_local_options_flow(payload: Dict[str, Any], db: Session = Depends(get
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"sessions_touched": result.sessions_touched, "rows_imported": result.rows_imported}
+
+
+def _options_signals_quality(db: Session, trade_date: date) -> Dict[str, Any] | None:
+    row = (
+        db.query(models.OptionsSignalsDataQualityDaily)
+        .filter(models.OptionsSignalsDataQualityDaily.trade_date == trade_date)
+        .first()
+    )
+    if not row:
+        return None
+    return {
+        "trade_date": row.trade_date.isoformat(),
+        "total_trades": row.total_trades,
+        "canceled_filtered": row.canceled_filtered,
+        "trades_missing_nbbo": row.trades_missing_nbbo,
+        "symbols_missing_ohlcv": row.symbols_missing_ohlcv,
+        "symbols_missing_news": row.symbols_missing_news,
+        "freshness": row.freshness_json,
+    }
 
 
 def _aggregate_for_session(session_id: str, db: Session) -> Dict[str, Dict[str, Dict[str, float]]]:
@@ -606,6 +644,75 @@ def compute_anomalies_v1(
         "summary": result["summary"],
         "events": events_payload,
         "rollups": rollups_payload,
+    }
+
+
+@router.post("/compute/correlations_v1")
+def compute_correlations_v1(
+    session_id: str = Form(...),
+    lookback_sessions: int = Form(60),
+    horizons: str = Form("1,3,5"),
+    method: str = Form("spearman"),
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(require_capability(Capability.COMPUTE_CORRELATIONS)),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    lookback = max(0, min(int(lookback_sessions), 180))
+    horizon_list = _parse_csv_ints(horizons, default=[1, 3, 5])
+
+    try:
+        payload = compute_and_persist_correlations_v1(
+            db,
+            session,
+            lookback_sessions=lookback,
+            horizons=horizon_list,
+            method=method,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    db.add(
+        models.LogMessage(
+            session_id=session_id,
+            level=models.LogLevel.INFO,
+            message="Computed correlations v1",
+            context={"lookback_sessions": lookback, "horizons": horizon_list, "method": method},
+        )
+    )
+    db.commit()
+    notify_decision({"type": "correlations_v1_complete", "session_id": session_id, "horizons": horizon_list})
+    return payload
+
+
+@router.get("/sessions/{session_id}/correlations")
+def get_correlations(
+    session_id: str,
+    version: str = "v1",
+    db: Session = Depends(get_db),
+):
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    q = db.query(models.CorrelationRun).filter(models.CorrelationRun.session_id == session_id)
+    if version:
+        q = q.filter(models.CorrelationRun.version == version)
+    run = q.order_by(models.CorrelationRun.computed_at.desc()).first()
+    if not run:
+        return {"run": None}
+    return {
+        "run": {
+            "run_id": str(run.run_id),
+            "session_id": str(run.session_id),
+            "asof_date": str(run.asof_date),
+            "version": run.version,
+            "computed_at": run.computed_at.isoformat() if run.computed_at else None,
+            "params": run.params,
+            "results": run.results,
+        }
     }
 
 
@@ -1045,3 +1152,131 @@ def get_outlier_symbols_detail(
                     symbol_rows.append(row)
     
     return {"symbol": symbol, "rows": symbol_rows, "count": len(symbol_rows)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONS SIGNALS DASHBOARD ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/options-signals/registry/features")
+def options_signals_features_registry():
+    return options_signals_service.get_feature_registry()
+
+
+@router.get("/options-signals/registry/signals")
+def options_signals_signals_registry():
+    return options_signals_service.get_signal_registry()
+
+
+@router.get("/options-signals/screener")
+def options_signals_screener(
+    date: str,
+    signal: str = "BULL_FLOW",
+    sector: str | None = None,
+    min_liquidity: float | None = None,
+    alerts_only: bool = False,
+    db: Session = Depends(get_db),
+):
+    try:
+        trade_date = parse_date(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.screener_rows(
+        db,
+        trade_date=trade_date,
+        signal_name=signal,
+        sector=sector,
+        min_liquidity=min_liquidity,
+        alerts_only=alerts_only,
+    )
+    return {
+        "rows": rows,
+        "data_quality": _options_signals_quality(db, trade_date),
+    }
+
+
+@router.get("/options-signals/symbol/{ticker}/timeseries")
+def options_signals_symbol_timeseries(
+    ticker: str,
+    from_date: str = Query(..., alias="from"),
+    to: str = Query(..., alias="to"),
+    db: Session = Depends(get_db),
+):
+    try:
+        start_date = parse_date(from_date)
+        end_date = parse_date(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.symbol_timeseries(
+        db,
+        symbol=ticker.upper(),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return {"rows": rows, "data_quality": _options_signals_quality(db, end_date)}
+
+
+@router.get("/options-signals/symbol/{ticker}/uoa")
+def options_signals_symbol_uoa(
+    ticker: str,
+    date: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        trade_date = parse_date(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.symbol_uoa(db, symbol=ticker.upper(), trade_date=trade_date)
+    return {"rows": rows, "data_quality": _options_signals_quality(db, trade_date)}
+
+
+@router.get("/options-signals/symbol/{ticker}/alerts")
+def options_signals_symbol_alerts(
+    ticker: str,
+    from_date: str = Query(..., alias="from"),
+    to: str = Query(..., alias="to"),
+    db: Session = Depends(get_db),
+):
+    try:
+        start_date = parse_date(from_date)
+        end_date = parse_date(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.symbol_alerts(
+        db,
+        symbol=ticker.upper(),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return {"rows": rows, "data_quality": _options_signals_quality(db, end_date)}
+
+
+@router.get("/options-signals/alerts")
+def options_signals_alerts_range(
+    from_date: str = Query(..., alias="from"),
+    to: str = Query(..., alias="to"),
+    db: Session = Depends(get_db),
+):
+    try:
+        start_date = parse_date(from_date)
+        end_date = parse_date(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.alerts_range(db, start_date=start_date, end_date=end_date)
+    return {"rows": rows, "data_quality": _options_signals_quality(db, end_date)}
+
+
+@router.get("/options-signals/data-quality")
+def options_signals_data_quality(
+    from_date: str = Query(..., alias="from"),
+    to: str = Query(..., alias="to"),
+    db: Session = Depends(get_db),
+):
+    try:
+        start_date = parse_date(from_date)
+        end_date = parse_date(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rows = options_signals_service.data_quality_range(db, start_date=start_date, end_date=end_date)
+    return {"rows": rows}
