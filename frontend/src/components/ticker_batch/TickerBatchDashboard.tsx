@@ -112,6 +112,9 @@ export default function TickerBatchDashboard({
   const [ensembles, setEnsembles] = useState<EnsembleRow[]>([]);
   const [anomalyRollups, setAnomalyRollups] = useState<AnomalyRollup[]>([]);
 
+  const [autoLoadSessionData, setAutoLoadSessionData] = useState<boolean>(true);
+  const [autoLoadOptionsSignals, setAutoLoadOptionsSignals] = useState<boolean>(true);
+
   const [selectedTicker, setSelectedTicker] = useState<string>("");
   const [selectedTickerEvents, setSelectedTickerEvents] = useState<AnomalyEvent[]>([]);
 
@@ -201,6 +204,20 @@ export default function TickerBatchDashboard({
       .catch(() => setOptionsRegistry({}));
   }, [apiBase]);
 
+  useEffect(() => {
+    // Auto-default to latest available options-signals date if sessionDate is not set.
+    if (sessionDate) return;
+    fetch(`${apiBase}/options-signals/latest-date`)
+      .then((res) => res.json())
+      .then((data) => {
+        const d = String(data?.date || "").trim();
+        if (d) setOptionsDate(d);
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, [apiBase, sessionDate]);
+
   const loadOptionsSignals = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -219,6 +236,18 @@ export default function TickerBatchDashboard({
       setLoading(false);
     }
   }, [apiBase, optionsDate, optionsSignal]);
+
+  useEffect(() => {
+    if (!autoLoadSessionData) return;
+    if (!sessionId) return;
+    loadSessionData();
+  }, [autoLoadSessionData, loadSessionData, sessionId]);
+
+  useEffect(() => {
+    if (!autoLoadOptionsSignals) return;
+    // Safe: options screener is GET-only.
+    loadOptionsSignals();
+  }, [autoLoadOptionsSignals, loadOptionsSignals]);
 
   const loadSelectedTickerEvents = useCallback(
     async (ticker: string) => {
@@ -485,6 +514,27 @@ export default function TickerBatchDashboard({
             >
               Clear
             </button>
+          </div>
+
+          <div className="tbRow tbMt10">
+            <label>
+              Auto-load session metrics
+              <input
+                type="checkbox"
+                checked={autoLoadSessionData}
+                onChange={(e) => setAutoLoadSessionData(e.target.checked)}
+                title="Automatically refresh regimes/ensemble/anomalies for the current session"
+              />
+            </label>
+            <label>
+              Auto-load options screener
+              <input
+                type="checkbox"
+                checked={autoLoadOptionsSignals}
+                onChange={(e) => setAutoLoadOptionsSignals(e.target.checked)}
+                title="Automatically refresh the options-signals screener for the selected date/signal"
+              />
+            </label>
           </div>
 
           {error && <div className="tbError tbMt8">{error}</div>}

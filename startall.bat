@@ -20,6 +20,9 @@ REM Default ports (can be overridden by env vars)
 if "%UWD_API_PORT%"=="" set "UWD_API_PORT=8000"
 if "%UWD_FRONTEND_PORT%"=="" set "UWD_FRONTEND_PORT=5173"
 
+REM Optional: open all frontend views (regime/options/tickers) automatically
+if "%UWD_OPEN_ALL_VIEWS%"=="" set "UWD_OPEN_ALL_VIEWS=false"
+
 REM Default DB connection (only set if not already set)
 if "%UW_DATABASE_URL%"=="" (
   set "UW_DATABASE_URL=postgresql+psycopg2://uw_app:uw_password@127.0.0.1:5433/uw_eod"
@@ -98,6 +101,10 @@ if not "%TS_SCORES_PATH%"=="" (
 
 REM Open key URLs
 start "Frontend" http://localhost:%UWD_FRONTEND_PORT%
+if /I "%UWD_OPEN_ALL_VIEWS%"=="true" (
+  start "Frontend - Options" http://localhost:%UWD_FRONTEND_PORT%/?view=options
+  start "Frontend - Tickers" http://localhost:%UWD_FRONTEND_PORT%/?view=tickers
+)
 start "API Docs" http://localhost:%UWD_API_PORT%/docs
 if not "%TS_SCORES_PATH%"=="" start "Trade Surveillance" http://localhost:%TS_DASHBOARD_PORT%
 

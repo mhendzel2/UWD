@@ -123,6 +123,19 @@ export default function OptionsSignalsDashboard({ apiBase }: { apiBase: string }
       .catch(() => setRegistry({}));
   }, [apiBase]);
 
+  useEffect(() => {
+    // Auto-default to latest available trade_date so the dashboard isn't empty on first load.
+    fetch(`${apiBase}/options-signals/latest-date`)
+      .then((res) => res.json())
+      .then((data) => {
+        const d = String(data?.date || "").trim();
+        if (d) setAsOfDate(d);
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, [apiBase]);
+
   const loadScreener = useCallback(() => {
     const params = new URLSearchParams();
     params.set("date", asOfDate);

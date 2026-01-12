@@ -1207,6 +1207,18 @@ def get_outlier_symbols_detail(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@router.get("/options-signals/latest-date")
+def options_signals_latest_date(db: Session = Depends(get_db)):
+    latest = (
+        db.query(models.SignalsUnderlyingDaily.trade_date)
+        .order_by(models.SignalsUnderlyingDaily.trade_date.desc())
+        .first()
+    )
+    if not latest:
+        return {"date": None}
+    return {"date": str(latest[0])}
+
+
 @router.get("/options-signals/registry/features")
 def options_signals_features_registry():
     return options_signals_service.get_feature_registry()
