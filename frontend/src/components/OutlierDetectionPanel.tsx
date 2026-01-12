@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import "./OutlierDetectionPanel.css";
 
 type Props = {
@@ -78,6 +79,7 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [data, setData] = useState<OutlierApiResponse | null>(null);
+  const [autoRun, setAutoRun] = useState<boolean>(true);
 
   const loadAvailableDates = useCallback(async () => {
     try {
@@ -97,6 +99,16 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
   useEffect(() => {
     if (sessionId) setSelectedSessionId(sessionId);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!autoRun) return;
+    if (!selectedSessionId) return;
+    if (loading) return;
+    if (data) return;
+    // Auto-run once for the selected session to make the panel useful by default.
+    runDetection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, selectedSessionId]);
 
   const runDetection = useCallback(async () => {
     if (!selectedSessionId) {
@@ -148,6 +160,28 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
     return data.preevent.results;
   }, [data, selectedMethod]);
 
+  const methodCounts = useMemo(() => {
+    if (!data) return [] as { method: string; count: number }[];
+    return [
+      { method: "Z-Score", count: data.zscore?.summary?.count || 0 },
+      { method: "IQR", count: data.iqr?.summary?.count || 0 },
+      { method: "Pre-Event", count: data.preevent?.summary?.count || 0 },
+    ];
+  }, [data]);
+
+  const topUnderlyings = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (activeResults || []).forEach((r) => {
+      const u = (r.underlying_symbol || "").toUpperCase();
+      if (!u) return;
+      counts[u] = (counts[u] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([underlying, count]) => ({ underlying, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
+  }, [activeResults]);
+
   const activeSummary = useMemo(() => {
     if (!data) return null;
     if (selectedMethod === "zscore") return data.zscore.summary;
@@ -189,6 +223,13 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
           </div>
           <div className="smallMuted">{methodLabel[selectedMethod]}</div>
         </div>
+      </div>
+
+      <div className="row rowAligned">
+        <label className="gridLabel autoRunLabel">
+          Auto-run on session select
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
+        </label>
       </div>
 
       <div className="grid4">
@@ -242,6 +283,40 @@ const OutlierDetectionPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDat
             <div>Max: {summary.preevent.max_oi_change}</div>
           </div>
           <div className="summaryFooter">Unique symbols: {summary.unique_symbols}  Total outliers returned: {summary.total_outliers}</div>
+        </div>
+      )}
+
+      {data && (
+        <div className="summaryGrid vizGrid2">
+          <div className="card vizCard">
+            <div className="cardTitle">Outliers by method</div>
+            <div className="vizChart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={methodCounts}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="method" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="count" fill="#0ea5e9" name="Count" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="card vizCard">
+            <div className="cardTitle">Top underlyings (active method)</div>
+            <div className="vizChart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topUnderlyings}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="underlying" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#16a34a" name="Count" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 

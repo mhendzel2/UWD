@@ -122,6 +122,29 @@
   margin: 8px 0;
 }
 
+.summaryRowStretch {
+  align-items: stretch;
+}
+
+.chartPill {
+  padding: 12px;
+}
+
+.chartPillWide {
+  flex: 2;
+  min-width: 420px;
+}
+
+.chartPillNarrow {
+  flex: 1;
+  min-width: 320px;
+}
+
+.chartInner {
+  height: 220px;
+  margin-top: 8px;
+}
+
 .pill {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid #1f2a44;

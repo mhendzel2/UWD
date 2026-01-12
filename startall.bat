@@ -29,6 +29,16 @@ echo UW_DATABASE_URL=%UW_DATABASE_URL%
 echo UWD_API_PORT=%UWD_API_PORT%
 echo UWD_FRONTEND_PORT=%UWD_FRONTEND_PORT%
 
+REM Ensure DB schema is up to date (idempotent). Set UWD_SKIP_MIGRATIONS=true to skip.
+if "%UWD_SKIP_MIGRATIONS%"=="" set "UWD_SKIP_MIGRATIONS=false"
+if /I not "%UWD_SKIP_MIGRATIONS%"=="true" (
+  echo.
+  echo Running alembic upgrade head...
+  pushd "%~dp0backend"
+  ..\.venv\Scripts\alembic.exe upgrade head
+  popd
+)
+
 REM Optionally start Postgres via docker-compose if docker is available
 docker --version >nul 2>&1
 if errorlevel 1 goto :skip_docker

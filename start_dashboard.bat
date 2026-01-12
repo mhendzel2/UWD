@@ -23,6 +23,16 @@ if "%UW_DATABASE_URL%"=="" (
 
 echo UW_DATABASE_URL=%UW_DATABASE_URL%
 
+REM Ensure DB schema is up to date (idempotent). Set UWD_SKIP_MIGRATIONS=true to skip.
+if "%UWD_SKIP_MIGRATIONS%"=="" set "UWD_SKIP_MIGRATIONS=false"
+if /I not "%UWD_SKIP_MIGRATIONS%"=="true" (
+  echo.
+  echo Running alembic upgrade head...
+  pushd "%~dp0backend"
+  ..\.venv\Scripts\alembic.exe upgrade head
+  popd
+)
+
 REM Pick a port (honor UWD_DASHBOARD_PORT if set; otherwise pick first free from 8501..8599)
 if "%UWD_DASHBOARD_PORT%"=="" (
   for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$ports=8501..8599; $used=@(); try { $used=(Get-NetTCPConnection -State Listen | Select-Object -ExpandProperty LocalPort) } catch {} ; $free=($ports | Where-Object { $_ -notin $used } | Select-Object -First 1); if (-not $free) { $free=8501 }; Write-Output $free"`) do (

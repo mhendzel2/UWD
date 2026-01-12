@@ -24,6 +24,7 @@ type Brief = { brief_type: string; entries: any };
 type Ensemble = { underlying: string; ensemble_label: string; ensemble_confidence?: number; horizon_weights?: Record<string, number>; component_votes?: any; stability_metrics?: any };
 
 function AppContent() {
+  const today = new Date().toISOString().slice(0, 10);
   const [activeView, setActiveView] = useState<"regime" | "options" | "tickers">(() => {
     try {
       const v = new URLSearchParams(window.location.search).get("view");
@@ -35,7 +36,7 @@ function AppContent() {
     }
   });
   const [sessionId, setSessionId] = useState<string>("");
-  const [sessionDate, setSessionDate] = useState<string>("");
+  const [sessionDate, setSessionDate] = useState<string>(today);
   const [strategyMode, setStrategyMode] = useState<string>("INDEX_EOD");
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [regimes, setRegimes] = useState<RegimeRow[]>([]);
@@ -67,14 +68,29 @@ function AppContent() {
       if (res.ok) {
         const data = await res.json();
         setSessionId(data.session_id);
-        setSessionDate(data.date);
-        setStrategyMode(data.strategy_mode);
+        setSessionDate(String(data.date));
+        setStrategyMode(String(data.strategy_mode || "INDEX_EOD"));
         setLogs((prev) => [`Loaded latest session ${data.date}`, ...prev]);
+        return;
+      }
+
+      // Fresh DB: create/ensure a default session so the UI is usable immediately.
+      if (res.status === 404) {
+        const form = new FormData();
+        form.append("session_date", today);
+        form.append("strategy_mode", strategyMode || "INDEX_EOD");
+        const ensured = await fetch(`${API_BASE}/sessions/ensure`, { method: "POST", body: form });
+        if (ensured.ok) {
+          const data = await ensured.json();
+          setSessionId(String(data.session_id));
+          setSessionDate(String(data.date || today));
+          setLogs((prev) => [`Created default session ${data.date || today}`, ...prev]);
+        }
       }
     } catch (e) {
       console.error("Failed to load latest session", e);
     }
-  }, []);
+  }, [strategyMode, today]);
 
   useEffect(() => {
     loadLatestSession();

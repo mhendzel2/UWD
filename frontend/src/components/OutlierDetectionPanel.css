@@ -55,6 +55,14 @@
   align-items: center;
 }
 
+.rowAligned {
+  align-items: center;
+}
+
+.autoRunLabel {
+  max-width: 320px;
+}
+
 .error {
   font-weight: 600;
 }
@@ -63,6 +71,19 @@
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.vizGrid2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vizCard {
+  min-height: 280px;
+}
+
+.vizChart {
+  height: 230px;
+  margin-top: 8px;
 }
 
 .card {

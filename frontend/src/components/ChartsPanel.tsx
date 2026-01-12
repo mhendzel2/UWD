@@ -12,11 +12,13 @@ import {
   Cell,
   ResponsiveContainer,
 } from "recharts";
+import "./ChartsPanel.css";
 
 type RegimeRow = {
   underlying: string;
   regime_label?: string;
   confidence_tier?: string;
+  dominant_horizon_hint?: string | null;
 };
 
 type Props = {
@@ -44,11 +46,36 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
   }, [regimes]);
 
+  const horizonDistribution = useMemo(() => {
+    const counts: Record<string, number> = {};
+    regimes.forEach((r) => {
+      const label = r.dominant_horizon_hint || "Unknown";
+      counts[label] = (counts[label] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [regimes]);
+
+  const regimeByConfidence = useMemo(() => {
+    const tiers = ["HIGH", "MEDIUM", "LOW", "Unknown"] as const;
+    const out: Record<string, any> = {};
+    regimes.forEach((r) => {
+      const regime = r.regime_label || "Unknown";
+      const tier = (r.confidence_tier || "Unknown").toUpperCase();
+      if (!out[regime]) {
+        out[regime] = { regime };
+        tiers.forEach((t) => (out[regime][t] = 0));
+      }
+      const key = (tiers as readonly string[]).includes(tier) ? tier : "Unknown";
+      out[regime][key] += 1;
+    });
+    return Object.values(out);
+  }, [regimes]);
+
   if (regimes.length === 0) return null;
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", marginTop: "20px" }}>
-      <div style={{ flex: 1, minWidth: "300px", height: "300px", border: "1px solid #eee", padding: "10px" }}>
+    <div className="chartsWrap">
+      <div className="chartCard">
         <h4>Regime Distribution</h4>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -71,7 +98,7 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
         </ResponsiveContainer>
       </div>
 
-      <div style={{ flex: 1, minWidth: "300px", height: "300px", border: "1px solid #eee", padding: "10px" }}>
+      <div className="chartCard">
         <h4>Confidence Levels</h4>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={confidenceDistribution}>
@@ -81,6 +108,37 @@ const ChartsPanel: React.FC<Props> = ({ regimes }) => {
             <Tooltip />
             <Legend />
             <Bar dataKey="value" fill="#82ca9d" name="Count" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="chartCard">
+        <h4>Dominant Horizon</h4>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={horizonDistribution}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="name" />
+            <YAxis allowDecimals={false} />
+            <Tooltip />
+            <Legend />
+            <Bar dataKey="value" fill="#8884d8" name="Count" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="chartCardWide">
+        <h4>Regime × Confidence</h4>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={regimeByConfidence}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="regime" />
+            <YAxis allowDecimals={false} />
+            <Tooltip />
+            <Legend />
+            <Bar dataKey="HIGH" stackId="a" fill="#16a34a" name="High" />
+            <Bar dataKey="MEDIUM" stackId="a" fill="#f59e0b" name="Medium" />
+            <Bar dataKey="LOW" stackId="a" fill="#ef4444" name="Low" />
+            <Bar dataKey="Unknown" stackId="a" fill="#94a3b8" name="Unknown" />
           </BarChart>
         </ResponsiveContainer>
       </div>

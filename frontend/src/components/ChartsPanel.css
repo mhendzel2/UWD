@@ -1,0 +1,22 @@
+.chartsWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.chartCard {
+  flex: 1;
+  min-width: 300px;
+  height: 300px;
+  border: 1px solid #eee;
+  padding: 10px;
+}
+
+.chartCardWide {
+  flex: 2;
+  min-width: 520px;
+  height: 300px;
+  border: 1px solid #eee;
+  padding: 10px;
+}

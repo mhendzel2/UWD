@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useUserState } from "../state/user";
 import { handleAuthFailure } from "../utils/http";
 import "./AnomaliesPanel.css";
@@ -135,6 +136,20 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
     return bySource;
   }, [events]);
 
+  const rollupTop = useMemo(() => {
+    return (rollups || [])
+      .slice()
+      .sort((a, b) => (b.severity_score || 0) - (a.severity_score || 0))
+      .slice(0, 12)
+      .map((r) => ({ ticker: r.ticker, severity: Number(r.severity_score || 0), ensemble: Number(r.ensemble_score || 0) }));
+  }, [rollups]);
+
+  const bySourceChart = useMemo(() => {
+    return Object.entries(summary)
+      .map(([source, count]) => ({ source, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [summary]);
+
   const selectedRollup = useMemo(() => {
     if (!selected) return null;
     return rollups.find((r) => r.ticker === selected.ticker) || null;
@@ -163,7 +178,13 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
         </div>
         <div className="chip">
           <span className="chipLabel">Lookback</span>
-          <input value={lookback} onChange={(e) => setLookback(e.target.value)} className="chipInput" />
+          <input
+            value={lookback}
+            onChange={(e) => setLookback(e.target.value)}
+            className="chipInput"
+            placeholder="30"
+            title="Lookback sessions"
+          />
           <span className="chipSuffix">sessions</span>
         </div>
       </div>
@@ -218,6 +239,42 @@ const AnomaliesPanel: React.FC<Props> = ({ apiBase, sessionId, sessionDate, onLo
           </div>
         ))}
       </div>
+
+      {(rollupTop.length > 0 || bySourceChart.length > 0) && (
+        <div className="summaryRow summaryRowStretch">
+          <div className="pill chartPill chartPillWide">
+            <div className="pillLabel">Top tickers by rollup severity</div>
+            <div className="chartInner">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={rollupTop}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="ticker" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="severity" fill="#ef4444" name="Severity" />
+                  <Bar dataKey="ensemble" fill="#0ea5e9" name="Ensemble" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="pill chartPill chartPillNarrow">
+            <div className="pillLabel">Events by source</div>
+            <div className="chartInner">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={bySourceChart}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="source" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#16a34a" name="Count" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="tableWrap">
         <table className="anomalyTable">
