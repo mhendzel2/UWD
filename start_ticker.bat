@@ -34,6 +34,9 @@ if "%UW_DATABASE_URL%"=="" (
   set "UW_DATABASE_URL=postgresql+psycopg2://uw_app:uw_password@127.0.0.1:5433/uw_eod"
 )
 
+REM Optional: open all frontend views (regime/options/tickers) automatically
+if "%UWD_OPEN_ALL_VIEWS%"=="" set "UWD_OPEN_ALL_VIEWS=false"
+
 REM Enable dev-only helper for loading a local CSV by absolute path (localhost-only)
 REM This is required for the dashboard's "Load from path" button.
 if "%UW_DEV_LOCAL_FILE_READ_ENABLED%"=="" set "UW_DEV_LOCAL_FILE_READ_ENABLED=true"
@@ -83,6 +86,10 @@ for /L %%I in (1,1,30) do (
 
 :open_browser
 start "Ticker Batch" http://localhost:%UWD_FRONTEND_PORT%/?view=tickers
+if /I "%UWD_OPEN_ALL_VIEWS%"=="true" (
+  start "Frontend" http://localhost:%UWD_FRONTEND_PORT%/
+  start "Frontend - Options" http://localhost:%UWD_FRONTEND_PORT%/?view=options
+)
 
 echo.
 echo Ticker Batch launched.
